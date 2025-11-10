@@ -1,23 +1,40 @@
-import { DarkTheme, DefaultTheme, ThemeProvider } from '@react-navigation/native';
-import { Stack } from 'expo-router';
-import { StatusBar } from 'expo-status-bar';
-import 'react-native-reanimated';
 
-import { useColorScheme } from '@/hooks/use-color-scheme';
+import { Stack } from 'expo-router';
+import 'react-native-reanimated';
+import { ThemeProvider, useTheme } from '@/hooks/use-theme';
+import { getHeaderTitle } from '@/utils/getHeaderTitle';
+import { StatusBar } from 'expo-status-bar';
 
 export const unstable_settings = {
-  anchor: '(tabs)',
+  initialRouteName: 'onboarding',
 };
 
-export default function RootLayout() {
-  const colorScheme = useColorScheme();
+function RootLayoutNav() {
+  const { theme } = useTheme();
 
   return (
-    <ThemeProvider value={colorScheme === 'dark' ? DarkTheme : DefaultTheme}>
-      <Stack>
-        <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
-        <Stack.Screen name="modal" options={{ presentation: 'modal', title: 'Modal' }} />
-      </Stack>
+    <Stack>
+      <Stack.Screen name="onboarding" options={{ headerShown: false }} />
+      <Stack.Screen
+        name="(tabs)"
+        options={({ route }) => ({
+          headerShown: false,
+          headerTitle: getHeaderTitle(route),
+          headerStyle: {
+            backgroundColor: theme === 'dark' ? '#1c1c1e' : '#ffffff',
+          },
+          headerTintColor: theme === 'dark' ? '#ffffff' : '#000000',
+        })}
+      />
+      <Stack.Screen name="modal" options={{ presentation: 'modal', title: 'Modal' }} />
+    </Stack>
+  );
+}
+
+export default function RootLayout() {
+  return (
+    <ThemeProvider>
+      <RootLayoutNav />
       <StatusBar style="auto" />
     </ThemeProvider>
   );
