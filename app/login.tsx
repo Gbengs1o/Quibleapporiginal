@@ -78,22 +78,9 @@ const LoginScreen = () => {
                 const data = await response.json();
 
                 if (response.ok) {
+                    await AsyncStorage.setItem('userData', JSON.stringify(data.user));
                     await AsyncStorage.setItem('accessToken', data.access_token);
-
-                    // Fetch user data
-                    const userResponse = await fetch(`${process.env.EXPO_PUBLIC_API_BASE_URL}/auth/me`, {
-                        headers: {
-                            'Authorization': `Bearer ${data.access_token}`
-                        }
-                    });
-
-                    if(userResponse.ok) {
-                        const userData = await userResponse.json();
-                        await AsyncStorage.setItem('userData', JSON.stringify(userData));
-                        router.push('/edit-profile');
-                    } else {
-                        Alert.alert('Error', 'Failed to fetch user data.');
-                    }
+                    router.push('/edit-profile');
                 } else {
                     Alert.alert('Error', data.message || 'Something went wrong');
                 }

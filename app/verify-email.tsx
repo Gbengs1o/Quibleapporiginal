@@ -19,7 +19,8 @@ import { useThemeColor } from '@/hooks/use-theme-color';
 
 const VerifyEmailScreen = () => {
     const router = useRouter();
-    const { userId } = useLocalSearchParams();
+    const { userId: userIdParam } = useLocalSearchParams();
+    const userId = Array.isArray(userIdParam) ? userIdParam[0] : userIdParam;
     const theme = useColorScheme() ?? 'light';
     const [code, setCode] = useState('');
     const [isLoading, setIsLoading] = useState(false);
@@ -53,7 +54,8 @@ const VerifyEmailScreen = () => {
                 Alert.alert('Success', 'Email verified successfully!');
                 router.replace('/edit-profile');
             } else {
-                Alert.alert('Error', data.message || 'Something went wrong');
+                const errorMessage = Array.isArray(data.message) ? data.message.join('\n') : data.message;
+                Alert.alert('Error', errorMessage || 'Something went wrong');
             }
         } catch (error) {
             Alert.alert('Error', 'An unexpected error occurred. Please try again.');
