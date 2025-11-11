@@ -24,7 +24,7 @@ const EditProfileScreen = () => {
         const fetchUserData = async () => {
             try {
                 const storedUserData = await AsyncStorage.getItem('userData');
-                if (storedUserData) {
+                if (storedUserData && storedUserData.length > 0) {
                     setUserData(JSON.parse(storedUserData));
                 }
             } catch (error) {
