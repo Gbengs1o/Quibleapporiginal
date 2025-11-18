@@ -30,25 +30,113 @@ export const useAuth = () => {
         loadUserData();
     }, []);
 
-    const login = async (token: string) => {
+    const signup = async (userData: any) => {
+        setIsLoading(true);
         try {
-            await AsyncStorage.setItem('accessToken', token);
-            // Since the login endpoint doesn't return user data, we'll fetch it separately.
-            // This is a workaround and assumes the /auth/create endpoint can be used to fetch user data.
             const response = await fetch(`${process.env.EXPO_PUBLIC_API_BASE_URL}/auth/create`, {
+                method: 'POST',
                 headers: {
-                    'Authorization': `Bearer ${token}`
-                }
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify(userData),
             });
+            const data = await response.json();
             if (response.ok) {
-                const userData = await response.json();
-                await AsyncStorage.setItem('userData', JSON.stringify(userData));
-                setUserData(userData);
+                await AsyncStorage.setItem('userData', JSON.stringify(data));
+                setUserData(data);
+                return { success: true, data };
             } else {
-                console.error('Failed to fetch user data after login');
+                return { success: false, message: data.message || 'Something went wrong' };
             }
         } catch (error) {
-            console.error('Failed to save user data to storage', error);
+            return { success: false, message: 'An unexpected error occurred' };
+        } finally {
+            setIsLoading(false);
+        }
+    };
+
+    const login = async (credentials: any) => {
+        setIsLoading(true);
+        try {
+            const response = await fetch(`${process.env.EXPO_PUBLIC_API_BASE_URL}/auth/login`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify(credentials),
+            });
+            const data = await response.json();
+            if (response.ok) {
+                await AsyncStorage.setItem('accessToken', data.access_token);
+                const userResponse = await fetch(`${process.env.EXPO_PUBLIC_API_BASE_URL}/auth/me`, {
+                    headers: {
+                        'Authorization': `Bearer ${data.access_token}`
+                    }
+                });
+                if (userResponse.ok) {
+                    const userData = await userResponse.json();
+                    await AsyncStorage.setItem('userData', JSON.stringify(userData));
+                    setUserData(userData);
+                    return { success: true };
+                } else {
+                    return { success: false, message: 'Failed to fetch user data after login' };
+                }
+            } else {
+                return { success: false, message: data.message || 'Login failed' };
+            }
+        } catch (error) {
+            return { success: false, message: 'An unexpected error occurred' };
+        } finally {
+            setIsLoading(false);
+        }
+    };
+
+    const verifyEmail = async (userId: string, token: string) => {
+        setIsLoading(true);
+        try {
+            const response = await fetch(`${process.env.EXPO_PUBLIC_API_BASE_URL}/auth/verify-email`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({ userId, token }),
+            });
+            const data = await response.json();
+            if (response.ok) {
+                return { success: true };
+            } else {
+                const errorMessage = Array.isArray(data.message) ? data.message.join('\n') : data.message;
+                return { success: false, message: errorMessage || 'Something went wrong' };
+            }
+        } catch (error) {
+            return { success: false, message: 'An unexpected error occurred. Please try again.' };
+        } finally {
+            setIsLoading(false);
+        }
+    };
+
+    const resendVerificationEmail = async (userId: string) => {
+        setIsLoading(true);
+        try {
+            const response = await fetch(`${process.env.EXPO_PUBLIC_API_BASE_URL}/auth/resend-verification-email`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({ userId }),
+            });
+
+            if (response.ok) {
+                return { success: true, message: 'A new verification code has been sent to your email.' };
+            } else {
+                const data = await response.json();
+                const errorMessage = Array.isArray(data.message) ? data.message.join('\n') : data.message;
+                return { success: false, message: errorMessage || 'Failed to resend verification code.' };
+            }
+        } catch (error) {
+            return { success: false, message: 'An unexpected error occurred. Please try again.' };
+        } finally {
+            setIsLoading(false);
         }
     };
 
@@ -71,5 +159,5 @@ export const useAuth = () => {
         }
     };
 
-    return { userData, isLoading, login, logout };
+    return { userData, isLoading, signup, login, verifyEmail, resendVerificationEmail, getAccessToken, logout };
 };

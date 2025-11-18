@@ -1,14 +1,12 @@
+
 import React from 'react';
 import { View, StyleSheet, Image } from 'react-native';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import Svg, { Path } from 'react-native-svg';
+import { User } from '@supabase/supabase-js';
 
-interface UserData {
-    name: string;
-}
-
-const ProfileHeader = ({ userData }: { userData: UserData | null }) => {
+const ProfileHeader = ({ userData }: { userData: User | null }) => {
   return (
     <View style={styles.wrapper}>
       {/* Curved Background */}
@@ -39,7 +37,7 @@ const ProfileHeader = ({ userData }: { userData: UserData | null }) => {
             <ThemedText style={styles.badgeText}>✓</ThemedText>
           </View>
         </View>
-        <ThemedText type="title" style={styles.name}>{userData ? userData.name : 'Guest'}</ThemedText>
+        <ThemedText type="title" style={styles.name}>{userData ? `${userData.user_metadata.first_name} ${userData.user_metadata.last_name}` : 'Guest'}</ThemedText>
         <ThemedText style={styles.memberSince}>Member since 2024</ThemedText>
       </ThemedView>
     </View>

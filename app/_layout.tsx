@@ -1,17 +1,16 @@
 
-import { Stack } from 'expo-router';
-import 'react-native-reanimated';
-import { ThemeProvider, useTheme } from '@/hooks/use-theme';
+import { AuthProvider } from '@/hooks/use-auth';
+import { ThemeProvider } from '@/hooks/use-theme';
 import { getHeaderTitle } from '@/utils/getHeaderTitle';
+import { Stack } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
+import 'react-native-reanimated';
 
 export const unstable_settings = {
   initialRouteName: 'onboarding',
 };
 
 function RootLayoutNav() {
-  const { theme } = useTheme();
-
   return (
     <Stack>
       <Stack.Screen name="onboarding" options={{ headerShown: false }} />
@@ -20,10 +19,6 @@ function RootLayoutNav() {
         options={({ route }) => ({
           headerShown: false,
           headerTitle: getHeaderTitle(route),
-          headerStyle: {
-            backgroundColor: theme === 'dark' ? '#1c1c1e' : '#ffffff',
-          },
-          headerTintColor: theme === 'dark' ? '#ffffff' : '#000000',
         })}
       />
       <Stack.Screen name="modal" options={{ presentation: 'modal', title: 'Modal' }} />
@@ -33,9 +28,11 @@ function RootLayoutNav() {
 
 export default function RootLayout() {
   return (
-    <ThemeProvider>
-      <RootLayoutNav />
-      <StatusBar style="auto" />
-    </ThemeProvider>
+    <AuthProvider>
+      <ThemeProvider>
+        <RootLayoutNav />
+        <StatusBar style="auto" />
+      </ThemeProvider>
+    </AuthProvider>
   );
 }

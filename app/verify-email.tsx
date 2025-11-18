@@ -1,5 +1,5 @@
 
-import React, { useState } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
     View,
     StyleSheet,
@@ -9,113 +9,131 @@ import {
     Text,
     Alert,
     ActivityIndicator,
-    KeyboardAvoidingView,
-    Platform
+    ScrollView,
+    Keyboard
 } from 'react-native';
 import { ThemedText } from '@/components/themed-text';
-import { ThemedView } from '@/components/themed-view';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useThemeColor } from '@/hooks/use-theme-color';
+import { useAuth } from '@/hooks/use-auth';
 
 const VerifyEmailScreen = () => {
     const router = useRouter();
     const { userId: userIdParam } = useLocalSearchParams();
-    const userId = Array.isArray(userIdParam) ? userIdParam[0] : userIdParam;
-    const theme = useColorScheme() ?? 'light';
-    const [code, setCode] = useState('');
-    const [isLoading, setIsLoading] = useState(false);
+    const { verifyEmail, resendVerificationEmail, isLoading, userData } = useAuth();
 
+    const [userId] = useState(() => {
+        const param = Array.isArray(userIdParam) ? userIdParam[0] : userIdParam;
+        return param || (userData?.id ? userData.id.toString() : undefined);
+    });
+
+    const [code, setCode] = useState('');
+    const [resendCooldown, setResendCooldown] = useState(0);
+    const timerRef = useRef<NodeJS.Timeout>();
+
+    const theme = useColorScheme() ?? 'light';
     const inputColor = useThemeColor({ light: '#1F2050', dark: '#FFFFFF' }, 'text');
     const backgroundColor = useThemeColor({ light: '#FFFFFF', dark: '#1A1A2E' }, 'background');
     const labelColor = useThemeColor({ light: '#1F2050', dark: '#E0E0E0' }, 'text');
     const inputBgColor = useThemeColor({ light: '#EBECF0', dark: '#2D2D44' }, 'background');
 
-    const handleVerify = async () => {
+    useEffect(() => {
+        if (resendCooldown > 0) {
+            timerRef.current = setInterval(() => {
+                setResendCooldown(prev => prev - 1);
+            }, 1000);
+        } else {
+            clearInterval(timerRef.current);
+        }
+
+        return () => clearInterval(timerRef.current);
+    }, [resendCooldown]);
+
+    const handleVerify = useCallback(async () => {
+        Keyboard.dismiss();
         if (code.length !== 4) {
             Alert.alert('Error', 'Please enter the 4-digit code.');
             return;
         }
-        setIsLoading(true);
-        try {
-            const response = await fetch(`${process.env.EXPO_PUBLIC_API_BASE_URL}/auth/verify-email`, {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                },
-                body: JSON.stringify({
-                    userId: userId,
-                    token: code,
-                }),
-            });
-
-            const data = await response.json();
-
-            if (response.ok) {
-                Alert.alert('Success', 'Email verified successfully!');
-                router.replace('/edit-profile');
-            } else {
-                const errorMessage = Array.isArray(data.message) ? data.message.join('\n') : data.message;
-                Alert.alert('Error', errorMessage || 'Something went wrong');
-            }
-        } catch (error) {
-            Alert.alert('Error', 'An unexpected error occurred. Please try again.');
-        } finally {
-            setIsLoading(false);
+        if (!userId) {
+            Alert.alert('Error', 'User ID not found. Please go back and try again.');
+            return;
         }
-    };
+        const result = await verifyEmail(userId, code);
+        if (result.success) {
+            Alert.alert('Success', 'Email verified successfully!', [
+                { text: 'OK', onPress: () => router.replace('/(tabs)/profile') },
+            ]);
+        } else {
+            Alert.alert('Error', result.message);
+        }
+    }, [code, userId, verifyEmail, router]);
 
-    const handleResend = () => {
-        Alert.alert('Info', 'This feature is not yet implemented. Please check with the backend team to ensure the email service is running.');
-    };
+    const handleResend = useCallback(async () => {
+        if (!userId) {
+            Alert.alert('Error', 'User ID not found. Please go back and try again.');
+            return;
+        }
+        const result = await resendVerificationEmail(userId);
+        Alert.alert(result.success ? 'Success' : 'Error', result.message);
+        if (result.success) {
+            setResendCooldown(60);
+        }
+    }, [userId, resendVerificationEmail]);
 
     return (
-        <KeyboardAvoidingView
-            style={{ flex: 1 }}
-            behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-            keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 20}
+        <ScrollView
+            style={{ flex: 1, backgroundColor }}
+            contentContainerStyle={styles.container}
+            keyboardShouldPersistTaps="handled"
+            showsVerticalScrollIndicator={false}
         >
-            <ThemedView style={[styles.container, { backgroundColor }]}>
-                <View style={styles.content}>
-                    <ThemedText style={[styles.title, { color: labelColor }]}>Verify Your Email</ThemedText>
-                    <ThemedText style={[styles.subtitle, { color: labelColor }]}>
-                        A 4-digit verification code has been sent to your email address. Please enter it below.
+            <View style={styles.content}>
+                <ThemedText style={[styles.title, { color: labelColor }]}>Verify Your Email</ThemedText>
+                <ThemedText style={[styles.subtitle, { color: labelColor }]}>
+                    A 4-digit verification code has been sent to your email address. Please enter it below.
+                </ThemedText>
+
+                <TextInput
+                    style={[styles.input, { color: inputColor, backgroundColor: inputBgColor }]}
+                    value={code}
+                    onChangeText={(text) => setCode(text.replace(/[^0-9]/g, ''))}
+                    keyboardType="number-pad"
+                    maxLength={4}
+                    placeholder="1234"
+                    placeholderTextColor={theme === 'dark' ? '#888' : '#999'}
+                />
+
+                <TouchableOpacity
+                    style={styles.verifyButton}
+                    onPress={handleVerify}
+                    disabled={isLoading}
+                    activeOpacity={0.8}
+                >
+                    {isLoading ? (
+                        <ActivityIndicator color="#fff" />
+                    ) : (
+                        <Text style={styles.verifyButtonText}>Verify Email</Text>
+                    )}
+                </TouchableOpacity>
+
+                <TouchableOpacity 
+                    style={styles.resendButton} 
+                    onPress={handleResend} 
+                    disabled={resendCooldown > 0 || isLoading}
+                >
+                    <ThemedText style={styles.resendButtonText}>
+                        {resendCooldown > 0 ? `Resend in ${resendCooldown}s` : 'Resend Code'}
                     </ThemedText>
-
-                    <TextInput
-                        style={[styles.input, { color: inputColor, backgroundColor: inputBgColor }]}
-                        value={code}
-                        onChangeText={(text) => setCode(text.replace(/[^0-9]/g, ''))}
-                        keyboardType="number-pad"
-                        maxLength={4}
-                        placeholder="1234"
-                        placeholderTextColor={theme === 'dark' ? '#888' : '#999'}
-                    />
-
-                    <TouchableOpacity
-                        style={styles.verifyButton}
-                        onPress={handleVerify}
-                        disabled={isLoading}
-                        activeOpacity={0.8}
-                    >
-                        {isLoading ? (
-                            <ActivityIndicator color="#fff" />
-                        ) : (
-                            <Text style={styles.verifyButtonText}>Verify Email</Text>
-                        )}
-                    </TouchableOpacity>
-
-                    <TouchableOpacity style={styles.resendButton} onPress={handleResend}>
-                        <ThemedText style={styles.resendButtonText}>Resend Code</ThemedText>
-                    </TouchableOpacity>
-                </View>
-            </ThemedView>
-        </KeyboardAvoidingView>
+                </TouchableOpacity>
+            </View>
+        </ScrollView>
     );
 };
 
 const styles = StyleSheet.create({
     container: {
-        flex: 1,
+        flexGrow: 1,
         justifyContent: 'center',
     },
     content: {

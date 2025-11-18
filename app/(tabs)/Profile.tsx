@@ -1,3 +1,4 @@
+
 import React from 'react';
 import { StyleSheet, ScrollView, ActivityIndicator } from 'react-native';
 import { ThemedView } from '@/components/themed-view';
@@ -5,12 +6,12 @@ import ProfileHeader from '@/components/ProfileHeader';
 import ProfileMenuList from '@/components/ProfileMenuList';
 import ProfileSupportList from '@/components/ProfileSupportList';
 import ProfileActionsList from '@/components/ProfileActionsList';
-import { useAuth } from '@/hooks/use-auth';
+import { useAuth } from '@/hooks/use-auth.tsx';
 
 export default function ProfileScreen() {
-    const { userData, isLoading, logout } = useAuth();
+    const { user, signOut, session } = useAuth();
 
-    if (isLoading) {
+    if (!session) {
         return (
             <ThemedView style={styles.loadingContainer}>
                 <ActivityIndicator size="large" />
@@ -21,10 +22,10 @@ export default function ProfileScreen() {
     return (
         <ThemedView style={styles.container}>
             <ScrollView contentContainerStyle={styles.scrollContent}>
-                <ProfileHeader userData={userData} />
-                <ProfileMenuList isLoggedIn={!!userData} />
+                <ProfileHeader userData={user} />
+                <ProfileMenuList isLoggedIn={!!user} />
                 <ProfileSupportList />
-                <ProfileActionsList isLoggedIn={!!userData} onLogout={logout} />
+                <ProfileActionsList isLoggedIn={!!user} onLogout={signOut} />
             </ScrollView>
         </ThemedView>
     );
@@ -33,6 +34,11 @@ export default function ProfileScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
+  },
+  loadingContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
   },
   scrollContent: {
     paddingBottom: 200, 

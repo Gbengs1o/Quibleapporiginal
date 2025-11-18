@@ -1,12 +1,13 @@
+
+import { supabase } from '@/utils/supabase';
 import React, { useState } from 'react';
-import { 
-    View, 
-    StyleSheet, 
-    TextInput, 
-    useColorScheme, 
-    Image, 
-    TouchableOpacity, 
-    Text, 
+import {
+    View,
+    StyleSheet,
+    TextInput,
+    useColorScheme,
+    TouchableOpacity,
+    Text,
     ScrollView,
     KeyboardAvoidingView,
     Platform,
@@ -17,11 +18,11 @@ import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { Link, useRouter } from 'expo-router';
 import { useThemeColor } from '@/hooks/use-theme-color';
-import AsyncStorage from '@react-native-async-storage/async-storage';
 
 const SignupScreen = () => {
     const router = useRouter();
     const theme = useColorScheme() ?? 'light';
+    const [isLoading, setIsLoading] = useState(false);
     const inputColor = useThemeColor({ light: '#1F2050', dark: '#FFFFFF' }, 'text');
     const backgroundColor = useThemeColor({ light: '#FFFFFF', dark: '#1A1A2E' }, 'background');
     const labelColor = useThemeColor({ light: '#1F2050', dark: '#E0E0E0' }, 'text');
@@ -41,7 +42,6 @@ const SignupScreen = () => {
     const [errors, setErrors] = useState<Record<string, string>>({});
     const [showPassword, setShowPassword] = useState(false);
     const [showConfirmPassword, setShowConfirmPassword] = useState(false);
-    const [isLoading, setIsLoading] = useState(false);
 
     // Validation functions
     const validateEmail = (email: string) => {
@@ -87,36 +87,25 @@ const SignupScreen = () => {
     const handleContinue = async () => {
         if (validateForm()) {
             setIsLoading(true);
-            try {
-                const response = await fetch(`${process.env.EXPO_PUBLIC_API_BASE_URL}/auth/create`, {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                    },
-                    body: JSON.stringify({
-                        name: `${formData.firstName} ${formData.lastName}`,
-                        email: formData.email,
-                        phone: `+234${formData.phoneNumber}`,
-                        password: formData.password,
-                    }),
-                });
-
-                const data = await response.json();
-
-                if (response.ok) {
-                    await AsyncStorage.setItem('userData', JSON.stringify(data));
-                    router.push({
-                        pathname: '/verify-email',
-                        params: { userId: data.id },
-                    });
-                } else {
-                    Alert.alert('Error', data.message || 'Something went wrong');
+            const { data, error } = await supabase.auth.signUp({
+                email: formData.email,
+                password: formData.password,
+                options: {
+                    data: {
+                        first_name: formData.firstName,
+                        last_name: formData.lastName,
+                        phone_number: formData.phoneNumber,
+                    }
                 }
-            } catch (error) {
-                Alert.alert('Error', 'An unexpected error occurred');
-            } finally {
-                setIsLoading(false);
+            });
+
+            if (error) {
+                Alert.alert('Error', error.message);
+            } else if (data.user) {
+                Alert.alert('Success', 'Please check your email for a verification link.');
+                router.push('/login');
             }
+            setIsLoading(false);
         }
     };
 
@@ -199,25 +188,19 @@ const SignupScreen = () => {
                         
                         <View style={styles.inputGroup}>
                             <ThemedText style={[styles.label, { color: labelColor }]}>Phone number *</ThemedText>
-                            <View style={[
-                                styles.phoneInputContainer,
-                                { backgroundColor: inputBgColor },
-                                errors.phoneNumber && styles.inputError
-                            ]}>
-                                <View style={[styles.countryCodeContainer, { borderRightColor: borderColor }]}>
-                                    <ThemedText style={[styles.flagEmoji, { color: inputColor }]}>🇳🇬</ThemedText>
-                                    <ThemedText style={[styles.countryCode, { color: inputColor }]}>+234</ThemedText>
-                                </View>
-                                <TextInput 
-                                    style={[styles.input, styles.phoneInput, { color: inputColor }]}
-                                    value={formData.phoneNumber}
-                                    onChangeText={(text) => updateField('phoneNumber', text.replace(/[^0-9]/g, ''))}
-                                    keyboardType="phone-pad"
-                                    placeholder="8012345678"
-                                    placeholderTextColor={theme === 'dark' ? '#888' : '#999'}
-                                    maxLength={11}
-                                />
-                            </View>
+                            <TextInput 
+                                style={[
+                                    styles.input, 
+                                    { color: inputColor, backgroundColor: inputBgColor },
+                                    errors.phoneNumber && styles.inputError
+                                ]}
+                                value={formData.phoneNumber}
+                                onChangeText={(text) => updateField('phoneNumber', text.replace(/[^0-9]/g, ''))}
+                                keyboardType="phone-pad"
+                                placeholder="e.g. +1234567890"
+                                placeholderTextColor={theme === 'dark' ? '#888' : '#999'}
+                                maxLength={15}
+                            />
                             {errors.phoneNumber && (
                                 <ThemedText style={styles.errorText}>{errors.phoneNumber}</ThemedText>
                             )}
@@ -387,10 +370,6 @@ const styles = StyleSheet.create({
         justifyContent: 'center',
         marginBottom: 20,
     },
-    logo: {
-        width: 53,
-        height: 49,
-    },
     logoText: {
         fontSize: 25,
         fontFamily: 'Montserrat_600SemiBold',
@@ -442,34 +421,6 @@ const styles = StyleSheet.create({
     },
     halfInput: {
         width: '100%',
-    },
-    phoneInputContainer: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        borderRadius: 8,
-        height: 54,
-        overflow: 'hidden',
-    },
-    countryCodeContainer: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        paddingLeft: 12,
-        paddingRight: 12,
-        height: '100%',
-        borderRightWidth: 1,
-    },
-    flagEmoji: {
-        fontSize: 24,
-        marginRight: 6,
-    },
-    countryCode: {
-        fontSize: 16,
-        fontFamily: 'OpenSans_600SemiBold',
-    },
-    phoneInput: {
-        flex: 1,
-        backgroundColor: 'transparent',
-        height: 54,
     },
     passwordContainer: {
         position: 'relative',
