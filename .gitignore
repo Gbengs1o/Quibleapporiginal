@@ -20,3 +20,4 @@ node_modules/
 
 expo-env.d.ts
 # @end expo-cli
+npm_output.log

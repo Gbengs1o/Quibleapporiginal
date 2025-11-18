@@ -83,7 +83,7 @@ const ForgotPasswordScreen = () => {
                     {!isSubmitted ? (
                         <>
                             <ThemedText style={[styles.description, { color: labelColor }]}>
-                                Enter your email address and we'll send you instructions to reset your password.
+                                Enter your email address and we&apos;ll send you instructions to reset your password.
                             </ThemedText>
 
                             <View style={styles.form}>
