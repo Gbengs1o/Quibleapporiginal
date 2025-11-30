@@ -1,3 +1,4 @@
+
 import React from 'react';
 import { View, StyleSheet, TouchableOpacity } from 'react-native';
 import { ThemedView } from './themed-view';
@@ -6,12 +7,12 @@ import { useThemeColor } from '@/hooks/use-theme-color';
 import { Feather, Ionicons, MaterialIcons } from '@expo/vector-icons';
 import { Link } from 'expo-router';
 
-const ProfileMenuList = ({ isLoggedIn }: { isLoggedIn: boolean }) => {
+const ProfileMenuList = ({ isLoggedIn }: { isLoggedIn: boolean; }) => {
   const iconColor = useThemeColor({ light: '#000', dark: '#fff' }, 'text');
   const containerBgColor = useThemeColor({ light: 'rgba(31, 32, 80, 0.08)', dark: 'rgba(31, 32, 80, 0.4)' });
   const separatorColor = useThemeColor({ light: 'rgba(0,0,0,0.1)', dark: 'rgba(255,255,255,0.1)' });
 
-  const allMenuItems = [
+  const menuItems = [
     {
       title: 'Edit Profile',
       icon: <Feather name="edit" size={24} color={iconColor} />,
@@ -38,13 +39,11 @@ const ProfileMenuList = ({ isLoggedIn }: { isLoggedIn: boolean }) => {
     },
   ];
 
-  const menuItems = allMenuItems.filter(item => !item.requiresAuth || isLoggedIn);
-
   return (
     <ThemedView style={[styles.container, { backgroundColor: containerBgColor }]}>
       {menuItems.map((item, index) => (
         <React.Fragment key={item.title}>
-          <Link href={item.href} asChild>
+          <Link href={item.requiresAuth && !isLoggedIn ? '/(auth)/login' : item.href} asChild>
             <TouchableOpacity style={styles.menuItem}>
               <View style={styles.iconContainer}>{item.icon}</View>
               <ThemedText style={styles.menuText}>{item.title}</ThemedText>

@@ -15,16 +15,17 @@ import {
 import { ThemedText } from '@/components/themed-text';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useThemeColor } from '@/hooks/use-theme-color';
-import { useAuth } from '@/hooks/use-auth';
+import { useAuth } from '@/contexts/auth';
 
 const VerifyEmailScreen = () => {
     const router = useRouter();
     const { userId: userIdParam } = useLocalSearchParams();
-    const { verifyEmail, resendVerificationEmail, isLoading, userData } = useAuth();
+    const { user, session, isReady } = useAuth();
+    const [isLoading, setIsLoading] = useState(false);
 
     const [userId] = useState(() => {
         const param = Array.isArray(userIdParam) ? userIdParam[0] : userIdParam;
-        return param || (userData?.id ? userData.id.toString() : undefined);
+        return param || (user?.id ? user.id.toString() : undefined);
     });
 
     const [code, setCode] = useState('');
@@ -59,27 +60,31 @@ const VerifyEmailScreen = () => {
             Alert.alert('Error', 'User ID not found. Please go back and try again.');
             return;
         }
-        const result = await verifyEmail(userId, code);
-        if (result.success) {
-            Alert.alert('Success', 'Email verified successfully!', [
-                { text: 'OK', onPress: () => router.replace('/(tabs)/profile') },
-            ]);
-        } else {
-            Alert.alert('Error', result.message);
-        }
-    }, [code, userId, verifyEmail, router]);
+        setIsLoading(true);
+        // const result = await verifyEmail(userId, code);
+        // if (result.success) {
+        //     Alert.alert('Success', 'Email verified successfully!', [
+        //         { text: 'OK', onPress: () => router.replace('/(tabs)/profile') },
+        //     ]);
+        // } else {
+        //     Alert.alert('Error', result.message);
+        // }
+        setIsLoading(false);
+    }, [code, userId, router]);
 
     const handleResend = useCallback(async () => {
         if (!userId) {
             Alert.alert('Error', 'User ID not found. Please go back and try again.');
             return;
         }
-        const result = await resendVerificationEmail(userId);
-        Alert.alert(result.success ? 'Success' : 'Error', result.message);
-        if (result.success) {
-            setResendCooldown(60);
-        }
-    }, [userId, resendVerificationEmail]);
+        setIsLoading(true);
+        // const result = await resendVerificationEmail(userId);
+        // Alert.alert(result.success ? 'Success' : 'Error', result.message);
+        // if (result.success) {
+        //     setResendCooldown(60);
+        // }
+        setIsLoading(false);
+    }, [userId]);
 
     return (
         <ScrollView

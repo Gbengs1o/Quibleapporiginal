@@ -4,9 +4,11 @@ import { View, StyleSheet, Image } from 'react-native';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import Svg, { Path } from 'react-native-svg';
-import { User } from '@supabase/supabase-js';
+import QuibbleLogo from './QuibbleLogo';
 
-const ProfileHeader = ({ userData }: { userData: User | null }) => {
+const ProfileHeader = ({ userData }: { userData: any | null }) => {
+  const name = userData ? `${userData.first_name} ${userData.last_name}` : '';
+
   return (
     <View style={styles.wrapper}>
       {/* Curved Background */}
@@ -28,17 +30,23 @@ const ProfileHeader = ({ userData }: { userData: User | null }) => {
       {/* Profile Content */}
       <ThemedView style={styles.container}>
         <View style={styles.profileImageContainer}>
-          <Image
-            source={{ uri: 'https://via.placeholder.com/150' }}
-            style={styles.profileImage}
-          />
-          {/* Optional badge/icon overlay */}
-          <View style={styles.badge}>
-            <ThemedText style={styles.badgeText}>✓</ThemedText>
-          </View>
+          {userData?.profile_picture_url ? (
+            <Image
+              source={{ uri: userData.profile_picture_url }}
+              style={styles.profileImage}
+            />
+          ) : (
+            <View style={[styles.profileImage, styles.logoContainer]}>
+                <QuibbleLogo width={70} height={70}/>
+            </View>
+          )}
+          {userData && (
+            <View style={styles.badge}>
+              <ThemedText style={styles.badgeText}>✓</ThemedText>
+            </View>
+          )}
         </View>
-        <ThemedText type="title" style={styles.name}>{userData ? `${userData.user_metadata.first_name} ${userData.user_metadata.last_name}` : 'Guest'}</ThemedText>
-        <ThemedText style={styles.memberSince}>Member since 2024</ThemedText>
+        {userData && <ThemedText type="title" style={styles.name}>{name}</ThemedText>}
       </ThemedView>
     </View>
   );
@@ -82,6 +90,11 @@ const styles = StyleSheet.create({
     borderWidth: 5,
     borderColor: '#fff',
     backgroundColor: '#fff',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  logoContainer: {
+    backgroundColor: '#FDBF50',
   },
   badge: {
     position: 'absolute',
@@ -105,10 +118,7 @@ const styles = StyleSheet.create({
     fontWeight: 'bold',
     fontSize: 24,
     marginBottom: 4,
-  },
-  memberSince: {
-    color: '#888',
-    fontSize: 14,
+    color: '#000',
   },
 });
 

@@ -1,54 +1,49 @@
 import React, { useState } from 'react';
-import { 
-    View, 
-    StyleSheet, 
-    TextInput, 
-    useColorScheme, 
-    TouchableOpacity, 
-    Text, 
+import {
+    View,
+    StyleSheet,
+    TextInput,
+    useColorScheme,
+    TouchableOpacity,
+    Text,
     ScrollView,
     KeyboardAvoidingView,
     Platform,
-    Alert
+    Alert,
+    ActivityIndicator
 } from 'react-native';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { useThemeColor } from '@/hooks/use-theme-color';
+import { supabase } from '@/utils/supabase';
+import { useRouter } from 'expo-router';
 
 const ChangePasswordScreen = () => {
     const theme = useColorScheme() ?? 'light';
+    const router = useRouter();
     const inputColor = useThemeColor({ light: '#1F2050', dark: '#FFFFFF' }, 'text');
     const backgroundColor = useThemeColor({ light: '#FFFFFF', dark: '#1A1A2E' }, 'background');
     const labelColor = useThemeColor({ light: '#1F2050', dark: '#E0E0E0' }, 'text');
     const inputBgColor = useThemeColor({ light: '#EBECF0', dark: '#2D2D44' }, 'background');
 
-    // Form state
     const [formData, setFormData] = useState({
-        currentPassword: '',
         newPassword: '',
         confirmPassword: ''
     });
     const [errors, setErrors] = useState<Record<string, string>>({});
     const [showPasswords, setShowPasswords] = useState({
-        current: false,
         new: false,
         confirm: false
     });
+    const [isLoading, setIsLoading] = useState(false);
 
-    // Validation function
     const validateForm = () => {
         const newErrors: Record<string, string> = {};
-
-        if (!formData.currentPassword) {
-            newErrors.currentPassword = 'Current password is required';
-        }
 
         if (!formData.newPassword) {
             newErrors.newPassword = 'New password is required';
         } else if (formData.newPassword.length < 8) {
             newErrors.newPassword = 'Password must be at least 8 characters';
-        } else if (formData.newPassword === formData.currentPassword) {
-            newErrors.newPassword = 'New password must be different from current password';
         }
 
         if (!formData.confirmPassword) {
@@ -61,30 +56,39 @@ const ChangePasswordScreen = () => {
         return Object.keys(newErrors).length === 0;
     };
 
-    const handleChangePassword = () => {
+    const handleChangePassword = async () => {
         if (validateForm()) {
-            Alert.alert('Success', 'Password changed successfully!');
-            // Handle password change logic here
-            // Reset form
-            setFormData({
-                currentPassword: '',
-                newPassword: '',
-                confirmPassword: ''
+            setIsLoading(true);
+            const { error } = await supabase.auth.updateUser({ 
+                password: formData.newPassword 
             });
-        } else {
-            Alert.alert('Error', 'Please fix the errors in the form');
-        }
+
+            setIsLoading(false);
+
+            if (error) {
+                Alert.alert('Error', error.message);
+            } else {
+                Alert.alert(
+                    'Success',
+                    'Your password has been changed successfully.',
+                    [{ text: 'OK', onPress: () => router.back() }]
+                );
+                setFormData({
+                    newPassword: '',
+                    confirmPassword: ''
+                });
+            }
+        } 
     };
 
     const updateField = (field: keyof typeof formData, value: string) => {
         setFormData(prev => ({ ...prev, [field]: value }));
-        // Clear error for this field when user starts typing
         if (errors[field]) {
             setErrors(prev => ({ ...prev, [field]: '' }));
         }
     };
 
-    const togglePasswordVisibility = (field: 'current' | 'new' | 'confirm') => {
+    const togglePasswordVisibility = (field: 'new' | 'confirm') => {
         setShowPasswords(prev => ({ ...prev, [field]: !prev[field] }));
     };
 
@@ -109,43 +113,10 @@ const ChangePasswordScreen = () => {
                     </ThemedText>
 
                     <ThemedText style={[styles.description, { color: labelColor }]}>
-                        Please enter your current password and choose a new secure password.
+                        Choose a new secure password.
                     </ThemedText>
 
                     <View style={styles.form}>
-                        {/* Current Password */}
-                        <View style={styles.inputGroup}>
-                            <ThemedText style={[styles.label, { color: labelColor }]}>
-                                Current Password *
-                            </ThemedText>
-                            <View style={styles.passwordContainer}>
-                                <TextInput 
-                                    style={[
-                                        styles.input, 
-                                        styles.passwordInput,
-                                        { color: inputColor, backgroundColor: inputBgColor },
-                                        errors.currentPassword && styles.inputError
-                                    ]}
-                                    value={formData.currentPassword}
-                                    onChangeText={(text) => updateField('currentPassword', text)}
-                                    secureTextEntry={!showPasswords.current}
-                                    placeholder="Enter your current password"
-                                    placeholderTextColor={theme === 'dark' ? '#888' : '#999'}
-                                />
-                                <TouchableOpacity 
-                                    style={styles.eyeIcon}
-                                    onPress={() => togglePasswordVisibility('current')}
-                                >
-                                    <ThemedText style={[styles.eyeText, { color: inputColor }]}>
-                                        {showPasswords.current ? '👁️' : '👁️‍🗨️'}
-                                    </ThemedText>
-                                </TouchableOpacity>
-                            </View>
-                            {errors.currentPassword && (
-                                <ThemedText style={styles.errorText}>{errors.currentPassword}</ThemedText>
-                            )}
-                        </View>
-
                         {/* New Password */}
                         <View style={styles.inputGroup}>
                             <ThemedText style={[styles.label, { color: labelColor }]}>
@@ -220,9 +191,6 @@ const ChangePasswordScreen = () => {
                             <ThemedText style={[styles.requirement, { color: labelColor }]}>
                                 • At least 8 characters long
                             </ThemedText>
-                            <ThemedText style={[styles.requirement, { color: labelColor }]}>
-                                • Different from your current password
-                            </ThemedText>
                         </View>
                     </View>
 
@@ -230,12 +198,14 @@ const ChangePasswordScreen = () => {
                         style={styles.changeButton}
                         onPress={handleChangePassword}
                         activeOpacity={0.8}
+                        disabled={isLoading}
                     >
-                        <Text style={styles.changeButtonText}>Change Password</Text>
+                        {isLoading ? (
+                            <ActivityIndicator color="#fff" />
+                        ) : (
+                            <Text style={styles.changeButtonText}>Change Password</Text>
+                        )}
                     </TouchableOpacity>
-
-                    {/* Extra padding at bottom for better scroll */}
-                    <View style={{ height: 40 }} />
                 </ScrollView>
             </ThemedView>
         </KeyboardAvoidingView>

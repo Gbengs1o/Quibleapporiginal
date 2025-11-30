@@ -6,6 +6,7 @@ import {
   Switch,
   Modal,
   TouchableWithoutFeedback,
+  Image,
 } from 'react-native';
 import { ThemedText } from './themed-text';
 import { useTheme } from '@/hooks/use-theme';
@@ -17,9 +18,10 @@ import { useRouter } from 'expo-router';
 interface SidePanelProps {
   isOpen: boolean;
   onClose: () => void;
+  profile: any;
 }
 
-const SidePanel: React.FC<SidePanelProps> = ({ isOpen, onClose }) => {
+const SidePanel: React.FC<SidePanelProps> = ({ isOpen, onClose, profile }) => {
   const { theme, toggleTheme } = useTheme();
   const panelBackgroundColor = useThemeColor({ light: '#fff', dark: '#000' }, 'background');
   const router = useRouter();
@@ -43,9 +45,16 @@ const SidePanel: React.FC<SidePanelProps> = ({ isOpen, onClose }) => {
       >
         <TouchableWithoutFeedback>
           <ThemedView style={[styles.panel, { backgroundColor: panelBackgroundColor }]}>
-            <View style={styles.logoContainer}>
-              <QuibbleLogo />
-            </View>
+            {profile ? (
+              <View style={styles.profileContainer}>
+                <Image source={{ uri: profile.profile_picture_url }} style={styles.profileImage} />
+                <ThemedText style={styles.profileName}>{`${profile.first_name} ${profile.last_name}`}</ThemedText>
+              </View>
+            ) : (
+              <View style={styles.logoContainer}>
+                <QuibbleLogo width={80} height={80} />
+              </View>
+            )}
             <View style={styles.buttonContainer}>
               <TouchableOpacity
                 style={styles.button}
@@ -75,6 +84,7 @@ const styles = StyleSheet.create({
   overlay: {
     flex: 1,
     backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    zIndex: 1000, // Ensure overlay is on top
   },
   panel: {
     position: 'absolute',
@@ -90,6 +100,21 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     marginBottom: 20,
     marginTop: 40, // Add margin to avoid status bar overlap
+  },
+  profileContainer: {
+    alignItems: 'center',
+    marginBottom: 20,
+    marginTop: 40, // Add margin to avoid status bar overlap
+  },
+  profileImage: {
+    width: 80,
+    height: 80,
+    borderRadius: 40,
+    marginBottom: 10,
+  },
+  profileName: {
+    fontSize: 18,
+    fontWeight: 'bold',
   },
   buttonContainer: {
     marginTop: 20,

@@ -17,7 +17,7 @@ import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { Link, useRouter } from 'expo-router';
 import { useThemeColor } from '@/hooks/use-theme-color';
-import { useAuth } from '@/hooks/use-auth';
+import { useAuth } from '@/contexts/auth';
 
 const LoginScreen = () => {
     const router = useRouter();
@@ -30,7 +30,7 @@ const LoginScreen = () => {
 
     useEffect(() => {
         if (session) {
-            router.replace('/(tabs)/Profile');
+            router.replace('/edit-profile');
         }
     }, [session, router]);
 
@@ -112,9 +112,11 @@ const LoginScreen = () => {
                         </View>
                     </View>
 
-                    <TouchableOpacity style={styles.forgotPasswordButton}>
-                        <ThemedText style={styles.forgotPasswordText}>Forgot Password?</ThemedText>
-                    </TouchableOpacity>
+                    <Link href="/forgot-password" asChild>
+                        <TouchableOpacity style={styles.forgotPasswordButton}>
+                            <ThemedText style={styles.forgotPasswordText}>Forgot Password?</ThemedText>
+                        </TouchableOpacity>
+                    </Link>
                 </View>
 
                 <TouchableOpacity 

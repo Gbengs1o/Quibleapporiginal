@@ -21,11 +21,13 @@ const TabBar = ({ state, descriptors, navigation }: BottomTabBarProps) => {
     badgeBackgroundColor: useThemeColor({ light: '#0A84FF', dark: '#0A84FF' }, 'tint'),
   };
 
+  const filteredRoutes = state.routes.filter(route => route.name !== 'edit-profile');
+
   return (
     <View style={themedStyles.tabBarContainer}>
       <BlurView intensity={20} tint={theme === 'dark' ? 'dark' : 'light'} style={styles.blurView}>
         <View style={styles.tabBar}>
-          {state.routes.map((route, index) => {
+          {filteredRoutes.map((route, index) => {
             const { options } = descriptors[route.key];
             const label =
               options.tabBarLabel !== undefined

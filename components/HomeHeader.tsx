@@ -1,29 +1,104 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import { 
   View, 
   Text, 
   StyleSheet, 
   Image, 
   TouchableOpacity,
-  Platform,
-  Dimensions 
+  Dimensions,
+  Switch,
+  Modal,
+  Alert
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import Svg, { Path } from 'react-native-svg';
 import { useRouter } from 'expo-router';
+import QuibbleLogo from './QuibbleLogo';
+import * as Location from 'expo-location';
+import LocationPermissionRequest from './LocationPermissionRequest';
 
 const { width } = Dimensions.get('window');
 
 interface HomeHeaderProps {
   onMenuPress: () => void;
+  profile: any;
 }
 
-const HomeHeader: React.FC<HomeHeaderProps> = ({ onMenuPress }) => {
+const HomeHeader: React.FC<HomeHeaderProps> = ({ onMenuPress, profile }) => {
   const router = useRouter();
+  const [location, setLocation] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [permissionStatus, setPermissionStatus] = useState<'undetermined' | 'granted' | 'denied'>('undetermined');
+
+  const fetchLocation = async () => {
+    setLoading(true);
+    let location = await Location.getCurrentPositionAsync({});
+    const address = await Location.reverseGeocodeAsync(location.coords);
+    if (address.length > 0) {
+      setLocation(`${address[0].city}, ${address[0].country}`);
+    } else {
+      setLocation('Location not found');
+    }
+    setLoading(false);
+  };
+
+  const checkPermission = async () => {
+    const { status } = await Location.getForegroundPermissionsAsync();
+    if (status === 'granted') {
+      setPermissionStatus('granted');
+      fetchLocation();
+    } else if (status === 'denied') {
+      setPermissionStatus('denied');
+      setLocation('Location permission denied');
+      setLoading(false);
+    } else {
+      setPermissionStatus('undetermined');
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    checkPermission();
+  }, []);
+
+  const handleGrantPermission = async () => {
+    const { status } = await Location.requestForegroundPermissionsAsync();
+    if (status === 'granted') {
+      setPermissionStatus('granted');
+      fetchLocation();
+    } else {
+      setPermissionStatus('denied');
+      setLocation('Location permission denied');
+    }
+  };
+
+  const handleSkip = () => {
+    Alert.alert(
+      "Location is Important",
+      "Quible uses your location to provide you with the best experience, including finding nearby services and accurate delivery estimates.",
+      [
+        { text: "Go Back", style: "cancel" },
+        {
+          text: "Continue Anyway",
+          onPress: () => {
+            setPermissionStatus('denied');
+            setLocation('Lagos, Nigeria'); // Default location
+          },
+        },
+      ]
+    );
+  };
 
   return (
     <View style={styles.wrapper}>
-      {/* SVG Curved Background - More pronounced wave */}
+      <Modal
+        visible={permissionStatus === 'undetermined'}
+        animationType="slide"
+        onRequestClose={() => {}}
+      >
+        <LocationPermissionRequest onGrantPermission={handleGrantPermission} onSkip={handleSkip} />
+      </Modal>
+      {/* SVG Curved Background */}
       <Svg 
         height="200" 
         width={width} 
@@ -48,11 +123,26 @@ const HomeHeader: React.FC<HomeHeaderProps> = ({ onMenuPress }) => {
 
         {/* Center: Location */}
         <View style={styles.centerSection}>
-          <Text style={styles.deliveryLabel}>Delivery to:</Text>
-          <TouchableOpacity style={styles.locationButton}>
-            <Text style={styles.locationName}>Lagos, Nigeria</Text>
-            <Ionicons name="chevron-down" size={14} color="#FFFFFF" style={styles.chevron} />
-          </TouchableOpacity>
+          {permissionStatus === 'granted' ? (
+            <>
+              <Text style={styles.deliveryLabel}>Delivery to:</Text>
+              <TouchableOpacity style={styles.locationButton}>
+                <Text style={styles.locationName}>{loading ? 'Loading...' : location}</Text>
+                <Ionicons name="chevron-down" size={14} color="#FFFFFF" style={styles.chevron} />
+              </TouchableOpacity>
+            </>
+          ) : (
+            <View style={styles.locationToggleContainer}>
+              <Text style={styles.locationToggleText}>Turn on location for a proper experience</Text>
+              <Switch
+                trackColor={{ false: '#767577', true: '#81b0ff' }}
+                thumbColor={permissionStatus === 'granted' ? '#f5dd4b' : '#f4f3f4'}
+                ios_backgroundColor="#3e3e3e"
+                onValueChange={handleGrantPermission}
+                value={permissionStatus === 'granted'}
+              />
+            </View>
+          )}
         </View>
 
         {/* Right: Bell & Avatar */}
@@ -62,15 +152,20 @@ const HomeHeader: React.FC<HomeHeaderProps> = ({ onMenuPress }) => {
             onPress={() => router.push('/notifications')}
           >
             <Ionicons name="notifications" size={24} color="#FFFFFF" />
-            {/* Red notification dot */}
             <View style={styles.notificationDot} />
           </TouchableOpacity>
           
-          <TouchableOpacity onPress={() => router.push('/Profile')}>
-            <Image 
-              source={{ uri: 'https://i.pravatar.cc/150?u=a042581f4e29026704d' }} 
-              style={styles.profileImage} 
-            />
+          <TouchableOpacity onPress={() => router.push('/(tabs)/Profile')}>
+            {profile?.profile_picture_url ? (
+              <Image 
+                source={{ uri: profile.profile_picture_url }} 
+                style={styles.profileImage} 
+              />
+            ) : (
+              <View style={styles.logoWrapper}>
+                <QuibbleLogo width={30} height={30} />
+              </View>
+            )}
           </TouchableOpacity>
         </View>
       </View>
@@ -109,7 +204,7 @@ const styles = StyleSheet.create({
   },
   centerSection: {
     flex: 1,
-    alignItems: 'flex-start',
+    alignItems: 'center',
     justifyContent: 'center',
     marginHorizontal: 15,
   },
@@ -160,6 +255,25 @@ const styles = StyleSheet.create({
     borderRadius: 20,
     borderWidth: 2,
     borderColor: '#FFFFFF',
+  },
+  logoWrapper: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    borderWidth: 2,
+    borderColor: '#FFFFFF',
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: '#FDBF50' // A background color for the logo
+  },
+  locationToggleContainer: {
+    alignItems: 'center',
+  },
+  locationToggleText: {
+    color: '#FFFFFF',
+    fontSize: 14,
+    fontWeight: '400',
+    marginBottom: 10,
   },
 });
 
