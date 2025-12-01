@@ -5,6 +5,12 @@
       "bundler": "metro"
     },
     "name": "quible",
-    "slug": "quible"
+    "slug": "quible",
+    "android": {
+      "package": "com.anonymous.quible"
+    },
+    "ios": {
+      "bundleIdentifier": "com.anonymous.quible"
+    }
   }
 }

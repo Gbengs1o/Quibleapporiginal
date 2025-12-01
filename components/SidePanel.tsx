@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import {
   View,
   StyleSheet,
@@ -25,10 +25,15 @@ const SidePanel: React.FC<SidePanelProps> = ({ isOpen, onClose, profile }) => {
   const { theme, toggleTheme } = useTheme();
   const panelBackgroundColor = useThemeColor({ light: '#fff', dark: '#000' }, 'background');
   const router = useRouter();
+  const [isDropdownOpen, setDropdownOpen] = useState(false);
 
   const handleNavigate = (path: string) => {
     router.push(path);
     onClose();
+  };
+
+  const toggleDropdown = () => {
+    setDropdownOpen(!isDropdownOpen);
   };
 
   return (
@@ -58,16 +63,38 @@ const SidePanel: React.FC<SidePanelProps> = ({ isOpen, onClose, profile }) => {
             <View style={styles.buttonContainer}>
               <TouchableOpacity
                 style={styles.button}
-                onPress={() => handleNavigate('join-restaurant')}
+                onPress={toggleDropdown}
               >
-                <ThemedText>Join as a restaurant owner</ThemedText>
+                <ThemedText>Register a service or business</ThemedText>
               </TouchableOpacity>
-              <TouchableOpacity
-                style={styles.button}
-                onPress={() => handleNavigate('join-rider')}
-              >
-                <ThemedText>Join as a Quible rider</ThemedText>
-              </TouchableOpacity>
+              {isDropdownOpen && (
+                <View style={styles.dropdown}>
+                  <TouchableOpacity
+                    style={styles.dropdownItem}
+                    onPress={() => handleNavigate('join-restaurant')}
+                  >
+                    <ThemedText>Restaurant</ThemedText>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={styles.dropdownItem}
+                    onPress={() => handleNavigate('join-rider')}
+                  >
+                    <ThemedText>Quible rider</ThemedText>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={styles.dropdownItem}
+                    onPress={() => handleNavigate('join-store')}
+                  >
+                    <ThemedText>Store</ThemedText>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={styles.dropdownItem}
+                    onPress={() => handleNavigate('join-handyman')}
+                  >
+                    <ThemedText>Handyman</ThemedText>
+                  </TouchableOpacity>
+                </View>
+              )}
             </View>
             <View style={styles.themeToggleContainer}>
               <ThemedText>Dark Mode</ThemedText>
@@ -123,6 +150,13 @@ const styles = StyleSheet.create({
     paddingVertical: 15,
     borderBottomWidth: 1,
     borderBottomColor: '#ccc',
+  },
+  dropdown: {
+    marginTop: 10,
+    paddingLeft: 15,
+  },
+  dropdownItem: {
+    paddingVertical: 10,
   },
   themeToggleContainer: {
     flexDirection: 'row',
