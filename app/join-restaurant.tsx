@@ -215,7 +215,7 @@ const Page4 = ({ back, submit, formData, setFormData }) => {
   );
 };
 
-export default function JoinRestaurantScreen() {
+const JoinRestaurantScreen = () => {
   const { user } = useAuth();
   const [page, setPage] = useState(1);
   const [formData, setFormData] = useState({
@@ -387,3 +387,5 @@ const styles = StyleSheet.create({
     marginBottom: 20,
   },
 });
+
+export default JoinRestaurantScreen;

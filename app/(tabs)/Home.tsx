@@ -7,7 +7,7 @@ import { supabase } from '@/utils/supabase';
 import { useEffect, useState } from 'react';
 import { StyleSheet } from 'react-native';
 
-export default function HomeScreen() {
+const HomeScreen = () => {
   const [isSidePanelOpen, setSidePanelOpen] = useState(false);
   const { user, isReady } = useAuth();
   const [profile, setProfile] = useState<any>(null);
@@ -54,3 +54,5 @@ const styles = StyleSheet.create({
     flex: 1,
   },
 });
+
+export default HomeScreen;
