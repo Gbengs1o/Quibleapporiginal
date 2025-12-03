@@ -9,9 +9,10 @@ import { supabase } from '@/utils/supabase';
 import { useRouter } from 'expo-router';
 import 'react-native-reanimated';
 
+// Prevent the splash screen from auto-hiding before asset loading is complete.
 SplashScreen.preventAutoHideAsync();
 
-function RootLayout() {
+export default function RootLayout() {
   const { isReady } = useAuth();
   const router = useRouter();
 
@@ -47,20 +48,14 @@ function RootLayout() {
   }
 
   return (
-      <Stack>
-        <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
-        <Stack.Screen name="(auth)" options={{ headerShown: false }} />
-        <Stack.Screen name="+not-found" />
-      </Stack>
+    <AuthProvider>
+      <ThemeProvider>
+        <Stack>
+          <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
+          <Stack.Screen name="(auth)" options={{ headerShown: false }} />
+          <Stack.Screen name="+not-found" />
+        </Stack>
+      </ThemeProvider>
+    </AuthProvider>
   );
-}
-
-export default function Layout() {
-    return (
-      <AuthProvider>
-        <ThemeProvider>
-          <RootLayout />
-        </ThemeProvider>
-      </AuthProvider>
-    )
 }

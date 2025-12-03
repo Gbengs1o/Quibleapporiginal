@@ -33,7 +33,7 @@ const GuestProfileView = () => {
     );
 };
 
-export default function ProfileScreen() {
+const ProfileScreen = () => {
     const { user, signOut, session, isReady } = useAuth();
     const [profile, setProfile] = useState<any>(null);
     const [loading, setLoading] = useState(true);
@@ -131,3 +131,5 @@ const styles = StyleSheet.create({
     letterSpacing: 0.5,
   },
 });
+
+export default ProfileScreen;
