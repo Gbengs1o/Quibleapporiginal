@@ -1,19 +1,21 @@
-import React, { useState } from 'react';
-import {
-  View,
-  StyleSheet,
-  TouchableOpacity,
-  Switch,
-  Modal,
-  TouchableWithoutFeedback,
-  Image,
-} from 'react-native';
-import { ThemedText } from './themed-text';
+import { useAuth } from '@/contexts/auth';
 import { useTheme } from '@/hooks/use-theme';
-import { ThemedView } from './themed-view';
 import { useThemeColor } from '@/hooks/use-theme-color';
-import QuibbleLogo from './QuibbleLogo';
+import { supabase } from '@/utils/supabase';
 import { useRouter } from 'expo-router';
+import React, { useEffect, useState } from 'react';
+import {
+  Image,
+  Modal,
+  StyleSheet,
+  Switch,
+  TouchableOpacity,
+  TouchableWithoutFeedback,
+  View,
+} from 'react-native';
+import QuibbleLogo from './QuibbleLogo';
+import { ThemedText } from './themed-text';
+import { ThemedView } from './themed-view';
 
 interface SidePanelProps {
   isOpen: boolean;
@@ -25,7 +27,33 @@ const SidePanel: React.FC<SidePanelProps> = ({ isOpen, onClose, profile }) => {
   const { theme, toggleTheme } = useTheme();
   const panelBackgroundColor = useThemeColor({ light: '#fff', dark: '#000' }, 'background');
   const router = useRouter();
+  const { user } = useAuth();
   const [isDropdownOpen, setDropdownOpen] = useState(false);
+  const [restaurant, setRestaurant] = useState<{ id: string; name: string; logo_url: string | null } | null>(null);
+
+  useEffect(() => {
+    if (user) {
+      checkRestaurantStatus();
+    } else {
+      setRestaurant(null);
+    }
+  }, [user]);
+
+  const checkRestaurantStatus = async () => {
+    try {
+      const { data, error } = await supabase
+        .from('restaurants')
+        .select('id, name, logo_url')
+        .eq('owner_id', user?.id)
+        .single();
+
+      if (data) {
+        setRestaurant(data);
+      }
+    } catch (error) {
+      console.log('Error checking restaurant status:', error);
+    }
+  };
 
   const handleNavigate = (path: string) => {
     router.push(path);
@@ -61,39 +89,81 @@ const SidePanel: React.FC<SidePanelProps> = ({ isOpen, onClose, profile }) => {
               </View>
             )}
             <View style={styles.buttonContainer}>
-              <TouchableOpacity
-                style={styles.button}
-                onPress={toggleDropdown}
-              >
-                <ThemedText>Register a service or business</ThemedText>
-              </TouchableOpacity>
-              {isDropdownOpen && (
-                <View style={styles.dropdown}>
+              {/* Show when logged in */}
+              {user ? (
+                <>
                   <TouchableOpacity
-                    style={styles.dropdownItem}
-                    onPress={() => handleNavigate('join-restaurant')}
+                    style={styles.button}
+                    onPress={toggleDropdown}
                   >
-                    <ThemedText>Restaurant</ThemedText>
+                    <ThemedText>Register a service or business</ThemedText>
                   </TouchableOpacity>
-                  <TouchableOpacity
-                    style={styles.dropdownItem}
-                    onPress={() => handleNavigate('join-rider')}
-                  >
-                    <ThemedText>Quible rider</ThemedText>
-                  </TouchableOpacity>
-                  <TouchableOpacity
-                    style={styles.dropdownItem}
-                    onPress={() => handleNavigate('join-store')}
-                  >
-                    <ThemedText>Store</ThemedText>
-                  </TouchableOpacity>
-                  <TouchableOpacity
-                    style={styles.dropdownItem}
-                    onPress={() => handleNavigate('join-handyman')}
-                  >
-                    <ThemedText>Handyman</ThemedText>
-                  </TouchableOpacity>
-                </View>
+                  {restaurant && (
+                    <TouchableOpacity
+                      style={styles.restaurantButton}
+                      onPress={() => handleNavigate('/restaurant/dashboard')}
+                    >
+                      <View style={styles.restaurantInfo}>
+                        {restaurant.logo_url ? (
+                          <Image
+                            source={{ uri: restaurant.logo_url }}
+                            style={styles.restaurantLogo}
+                          />
+                        ) : (
+                          <View style={styles.restaurantLogoPlaceholder}>
+                            <ThemedText style={styles.restaurantLogoText}>
+                              {restaurant.name?.[0]?.toUpperCase() || 'R'}
+                            </ThemedText>
+                          </View>
+                        )}
+                        <View style={styles.restaurantTextContainer}>
+                          <ThemedText style={styles.restaurantName}>{restaurant.name}</ThemedText>
+                          <ThemedText style={styles.restaurantLabel}>Your Restaurant</ThemedText>
+                        </View>
+                      </View>
+                    </TouchableOpacity>
+                  )}
+                  {isDropdownOpen && (
+                    <View style={styles.dropdown}>
+                      {!restaurant && (
+                        <TouchableOpacity
+                          style={styles.dropdownItem}
+                          onPress={() => handleNavigate('join-restaurant')}
+                        >
+                          <ThemedText>Restaurant</ThemedText>
+                        </TouchableOpacity>
+                      )}
+                      <TouchableOpacity
+                        style={styles.dropdownItem}
+                        onPress={() => handleNavigate('join-rider')}
+                      >
+                        <ThemedText>Quible rider</ThemedText>
+                      </TouchableOpacity>
+                      <TouchableOpacity
+                        style={styles.dropdownItem}
+                        onPress={() => handleNavigate('join-store')}
+                      >
+                        <ThemedText>Store</ThemedText>
+                      </TouchableOpacity>
+                      <TouchableOpacity
+                        style={styles.dropdownItem}
+                        onPress={() => handleNavigate('join-handyman')}
+                      >
+                        <ThemedText>Handyman</ThemedText>
+                      </TouchableOpacity>
+                    </View>
+                  )}
+                </>
+              ) : (
+                /* Show when not logged in */
+                <TouchableOpacity
+                  style={styles.createAccountButton}
+                  onPress={() => handleNavigate('/signup')}
+                >
+                  <ThemedText style={styles.createAccountText}>
+                    Create account to have full access
+                  </ThemedText>
+                </TouchableOpacity>
               )}
             </View>
             <View style={styles.themeToggleContainer}>
@@ -164,6 +234,58 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     marginTop: 'auto',
     marginBottom: 20,
+  },
+  restaurantButton: {
+    paddingVertical: 15,
+    borderBottomWidth: 1,
+    borderBottomColor: '#ccc',
+  },
+  restaurantInfo: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+  },
+  restaurantLogo: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: '#f0f0f0',
+  },
+  restaurantLogoPlaceholder: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: '#f27c22',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  restaurantLogoText: {
+    color: '#fff',
+    fontSize: 18,
+    fontWeight: 'bold',
+  },
+  restaurantTextContainer: {
+    flex: 1,
+  },
+  restaurantName: {
+    fontSize: 16,
+    fontWeight: '600',
+  },
+  restaurantLabel: {
+    fontSize: 12,
+    opacity: 0.6,
+  },
+  createAccountButton: {
+    paddingVertical: 20,
+    paddingHorizontal: 15,
+    backgroundColor: 'rgba(242, 124, 34, 0.1)',
+    borderRadius: 10,
+    alignItems: 'center',
+  },
+  createAccountText: {
+    color: '#f27c22',
+    fontWeight: '600',
+    textAlign: 'center',
   },
 });
 

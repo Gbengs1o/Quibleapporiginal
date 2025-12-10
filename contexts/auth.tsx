@@ -11,10 +11,22 @@ export const AuthProvider = ({ children }: any) => {
     const [isReady, setIsReady] = useState(false);
 
     useEffect(() => {
-        const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+        // Get initial session
+        supabase.auth.getSession().then(({ data: { session } }) => {
+            console.log('Initial session loaded:', session ? 'User logged in' : 'No session');
             setSession(session);
             setUser(session?.user ?? null);
             setIsReady(true);
+        }).catch((error) => {
+            console.error('Error getting session:', error);
+            setIsReady(true); // Set ready even on error
+        });
+
+        // Listen for auth changes
+        const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+            console.log('Auth state changed:', _event);
+            setSession(session);
+            setUser(session?.user ?? null);
         });
 
         return () => {
