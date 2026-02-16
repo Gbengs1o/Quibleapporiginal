@@ -14,6 +14,8 @@ export interface CartItem {
         id: string;
         name: string;
         logo_url: string | null;
+        latitude: number;
+        longitude: number;
     };
 }
 

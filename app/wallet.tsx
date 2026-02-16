@@ -16,6 +16,7 @@ import {
   ScrollView,
   SectionList,
   StyleSheet,
+  Text,
   TextInput,
   TouchableOpacity,
   View
@@ -25,6 +26,7 @@ export default function WalletScreen() {
   const {
     personalWallet,
     businessWallet,
+    riderWallet,
     activeWallet,
     transactions,
     isLoading,
@@ -79,6 +81,8 @@ export default function WalletScreen() {
     const banks = await getBanks();
     setBankList(banks);
   };
+
+  // Removed forceful reset to Personal wallet to allow user to view Rider wallet if desired.
 
   // --- Actions ---
 
@@ -300,11 +304,13 @@ export default function WalletScreen() {
             {/* Header & Switch */}
             <View style={styles.topRow}>
               <ThemedText type="title" style={[styles.title, { color: textColor }]}>Wallet</ThemedText>
-              {businessWallet && (
+              {(businessWallet || riderWallet) && (
                 <TouchableOpacity style={styles.switchButton} onPress={switchWallet}>
                   <Ionicons name="swap-horizontal" size={20} color="#f27c22" />
                   <ThemedText style={styles.switchText}>
-                    {activeWallet?.type === 'personal' ? 'Business' : 'Personal'}
+                    {activeWallet?.type === 'personal' ? (businessWallet ? 'Business' : riderWallet ? 'Rider' : '') :
+                      activeWallet?.type === 'business' ? (riderWallet ? 'Rider' : 'Personal') :
+                        'Personal'}
                   </ThemedText>
                 </TouchableOpacity>
               )}
@@ -318,38 +324,46 @@ export default function WalletScreen() {
               style={styles.balanceCard}
             >
               <View style={styles.cardHeader}>
-                <ThemedText style={styles.balanceLabel}>
-                  {activeWallet?.type === 'personal' ? 'Personal Balance' : 'Business Balance'}
-                </ThemedText>
+                <Text style={styles.balanceLabel}>
+                  {activeWallet?.type === 'business' ? 'Business Balance' :
+                    activeWallet?.type === 'rider' ? 'Rider Balance' :
+                      'Personal Balance'}
+                </Text>
                 <TouchableOpacity onPress={() => setHideBalance(!hideBalance)}>
                   <Ionicons name={hideBalance ? "eye-off" : "eye"} size={20} color="rgba(255,255,255,0.8)" />
                 </TouchableOpacity>
               </View>
 
-              <ThemedText style={styles.balanceValue} adjustsFontSizeToFit numberOfLines={1}>
-                {activeWallet ? (hideBalance ? '••••••' : formatCurrency(activeWallet.balance)) : '---'}
-              </ThemedText>
+              <View style={styles.balanceRow}>
+                <Text
+                  style={styles.balanceValue}
+                  adjustsFontSizeToFit
+                  numberOfLines={1}
+                >
+                  {activeWallet ? (hideBalance ? '••••••' : formatCurrency(activeWallet.balance)) : '---'}
+                </Text>
+              </View>
 
               <View style={styles.actionRow}>
                 {activeWallet?.type === 'personal' ? (
                   <>
                     <TouchableOpacity style={styles.actionBtn} onPress={() => setShowFundModal(true)}>
                       <View style={styles.actionIcon}><Ionicons name="add" size={24} color="#f27c22" /></View>
-                      <ThemedText style={styles.actionText}>Top Up</ThemedText>
+                      <Text style={styles.actionText}>Top Up</Text>
                     </TouchableOpacity>
                     <TouchableOpacity style={styles.actionBtn} onPress={() => setShowP2PModal(true)}>
                       <View style={styles.actionIcon}><Ionicons name="paper-plane" size={24} color="#f27c22" /></View>
-                      <ThemedText style={styles.actionText}>Send</ThemedText>
+                      <Text style={styles.actionText}>Send</Text>
                     </TouchableOpacity>
                     <TouchableOpacity style={styles.actionBtn} onPress={() => setShowWithdrawModal(true)}>
                       <View style={styles.actionIcon}><Ionicons name="cash" size={24} color="#f27c22" /></View>
-                      <ThemedText style={styles.actionText}>Withdraw</ThemedText>
+                      <Text style={styles.actionText}>Withdraw</Text>
                     </TouchableOpacity>
                   </>
                 ) : (
                   <TouchableOpacity style={styles.actionBtn} onPress={() => setShowTransferModal(true)}>
                     <View style={styles.actionIcon}><Ionicons name="arrow-forward" size={24} color="#f27c22" /></View>
-                    <ThemedText style={styles.actionText}>To Personal</ThemedText>
+                    <Text style={styles.actionText}>To Personal</Text>
                   </TouchableOpacity>
                 )}
               </View>
@@ -615,12 +629,13 @@ const styles = StyleSheet.create({
   switchText: { color: '#f27c22', fontWeight: '700', fontSize: 12 },
 
   balanceCard: { borderRadius: 24, padding: 24, marginBottom: 24, shadowColor: '#f27c22', shadowOffset: { width: 0, height: 10 }, shadowOpacity: 0.3, shadowRadius: 20, elevation: 10 },
-  cardHeader: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 8 },
+  cardHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 },
   balanceLabel: { color: 'rgba(255,255,255,0.9)', fontSize: 14, fontWeight: '500' },
-  balanceValue: { color: '#fff', fontSize: 32, fontWeight: '800', marginBottom: 24 },
+  balanceRow: { marginBottom: 24, paddingRight: 10 },
+  balanceValue: { color: '#fff', fontSize: 32, fontWeight: '800', letterSpacing: -0.5 },
 
-  actionRow: { flexDirection: 'row', justifyContent: 'space-between' },
-  actionBtn: { alignItems: 'center', gap: 8 },
+  actionRow: { flexDirection: 'row', justifyContent: 'space-around', paddingHorizontal: 10 },
+  actionBtn: { alignItems: 'center', gap: 8, flex: 1 },
   actionIcon: { width: 56, height: 56, borderRadius: 28, backgroundColor: '#fff', justifyContent: 'center', alignItems: 'center', shadowColor: '#000', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.2, shadowRadius: 8, elevation: 5 },
   actionText: { color: '#fff', fontSize: 12, fontWeight: '600' },
 

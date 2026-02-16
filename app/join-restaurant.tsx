@@ -404,7 +404,7 @@ const JoinRestaurantScreen = () => {
         throw error;
       }
 
-      Alert.alert('Success', 'Restaurant registered successfully!', [
+      Alert.alert('Application Submitted', 'Your restaurant application is under review. We will notify you once approved.', [
         {
           text: 'OK',
           onPress: () => {

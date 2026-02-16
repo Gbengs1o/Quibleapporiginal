@@ -1,6 +1,6 @@
 
-import React from 'react';
 import { Stack } from 'expo-router';
+import React from 'react';
 
 export default function AuthLayout() {
   return (
@@ -9,6 +9,7 @@ export default function AuthLayout() {
       <Stack.Screen name="signup" options={{ headerShown: false }} />
       <Stack.Screen name="forgot-password" options={{ headerShown: false }} />
       <Stack.Screen name="verify-email" options={{ headerShown: false }} />
+      <Stack.Screen name="reset-password" options={{ headerShown: false }} />
     </Stack>
   );
 }

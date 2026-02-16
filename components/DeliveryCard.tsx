@@ -1,9 +1,11 @@
-import React from 'react';
-import { View, Text, StyleSheet, Image, TouchableOpacity, Platform } from 'react-native';
 import { useTheme } from '@/hooks/use-theme';
+import { useRouter } from 'expo-router';
+import React from 'react';
+import { Image, Platform, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 
 const DeliveryCard = () => {
   const { theme } = useTheme();
+  const router = useRouter(); // Hook
   const cardBackgroundColor = theme === 'dark' ? '#1c1c1e' : '#ffffff';
   const textColor = theme === 'dark' ? '#ffffff' : '#1F2051';
   const shadowColor = theme === 'dark' ? '#000' : '#1F2051';
@@ -12,8 +14,8 @@ const DeliveryCard = () => {
 
   return (
     <View style={[
-      styles.card, 
-      { 
+      styles.card,
+      {
         backgroundColor: cardBackgroundColor,
         shadowColor: shadowColor,
       }
@@ -31,9 +33,10 @@ const DeliveryCard = () => {
         <Text style={[styles.boldText, { color: textColor }]}>
           Quible Delivery got{'\n'}you covered
         </Text>
-        <TouchableOpacity 
+        <TouchableOpacity
           style={[styles.button, { backgroundColor: buttonBackgroundColor }]}
           activeOpacity={0.8}
+          onPress={() => router.push('/send-package')}
         >
           <Text style={[styles.buttonText, { color: buttonTextColor }]}>Try now</Text>
         </TouchableOpacity>

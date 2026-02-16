@@ -1,11 +1,12 @@
+import FoodLoader from '@/components/FoodLoader';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { useAuth } from '@/contexts/auth';
+import { useRestaurantMenu } from '@/contexts/restaurant-menu';
 import { useTheme } from '@/hooks/use-theme';
 import { useThemeColor } from '@/hooks/use-theme-color';
 import { supabase } from '@/utils/supabase';
 import { Feather, Ionicons } from '@expo/vector-icons';
-import { DrawerActions } from '@react-navigation/native';
 import * as ImagePicker from 'expo-image-picker';
 import { useNavigation } from 'expo-router';
 import React, { useEffect, useState } from 'react';
@@ -19,7 +20,7 @@ import {
     Switch,
     TextInput,
     TouchableOpacity,
-    View
+    View,
 } from 'react-native';
 
 interface MenuItem {
@@ -39,9 +40,12 @@ const CATEGORIES = ['African dishes', 'Special dishes', 'Others'] as const;
 
 export default function MenuScreen() {
     const navigation = useNavigation();
+    const { openMenu } = useRestaurantMenu();
     const { user } = useAuth();
     const { theme } = useTheme();
     const isDark = theme === 'dark';
+
+    // ... (existing state and useEffects)
 
     const [loading, setLoading] = useState(true);
     const [menuItems, setMenuItems] = useState<MenuItem[]>([]);
@@ -387,11 +391,15 @@ export default function MenuScreen() {
 
     const activeFiltersCount = [filterCategory, filterStatus !== null ? 'status' : null].filter(Boolean).length;
 
+    if (loading && menuItems.length === 0) {
+        return <FoodLoader message="Loading menu..." />;
+    }
+
     return (
         <ThemedView style={styles.container}>
             {/* Header */}
             <View style={styles.header}>
-                <TouchableOpacity onPress={() => navigation.dispatch(DrawerActions.openDrawer())}>
+                <TouchableOpacity onPress={openMenu}>
                     <Ionicons name="menu" size={28} color={headerIconColor} />
                 </TouchableOpacity>
                 <ThemedText type="title" style={[styles.title, { color: textColor }]}>Menu Management</ThemedText>

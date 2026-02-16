@@ -1,0 +1,2 @@
+ALTER TABLE riders ADD COLUMN IF NOT EXISTS current_speed FLOAT;
+ALTER TABLE riders ADD COLUMN IF NOT EXISTS current_heading FLOAT;

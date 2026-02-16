@@ -1,15 +1,16 @@
 
-import React, { useEffect, useState } from 'react';
-import { StyleSheet, ScrollView, View, TouchableOpacity, Text, ActivityIndicator } from 'react-native';
-import { ThemedView } from '@/components/themed-view';
-import { ThemedText } from '@/components/themed-text';
+import LogoLoader from '@/components/LogoLoader';
+import ProfileActionsList from '@/components/ProfileActionsList';
 import ProfileHeader from '@/components/ProfileHeader';
 import ProfileMenuList from '@/components/ProfileMenuList';
 import ProfileSupportList from '@/components/ProfileSupportList';
-import ProfileActionsList from '@/components/ProfileActionsList';
+import { ThemedText } from '@/components/themed-text';
+import { ThemedView } from '@/components/themed-view';
 import { useAuth } from '@/contexts/auth';
-import { useRouter } from 'expo-router';
 import { supabase } from '@/utils/supabase';
+import { useRouter } from 'expo-router';
+import React, { useEffect, useState } from 'react';
+import { ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 
 const GuestProfileView = () => {
     const router = useRouter();
@@ -26,7 +27,7 @@ const GuestProfileView = () => {
                 </TouchableOpacity>
                 <View style={{ width: 10 }} />
                 <TouchableOpacity style={styles.button} onPress={() => router.push('/(auth)/signup')}>
-                     <Text style={styles.buttonText}>Sign Up</Text>
+                    <Text style={styles.buttonText}>Sign Up</Text>
                 </TouchableOpacity>
             </View>
         </ThemedView>
@@ -39,6 +40,12 @@ const ProfileScreen = () => {
     const [loading, setLoading] = useState(true);
 
     useEffect(() => {
+        if (isReady && !user) {
+            setProfile(null);
+            setLoading(false);
+            return;
+        }
+
         const fetchProfile = async () => {
             if (user) {
                 try {
@@ -54,9 +61,6 @@ const ProfileScreen = () => {
                 } finally {
                     setLoading(false);
                 }
-            } else {
-                setProfile(null);
-                setLoading(false);
             }
         };
 
@@ -68,7 +72,7 @@ const ProfileScreen = () => {
     if (loading || !isReady) {
         return (
             <ThemedView style={styles.centered}>
-                <ActivityIndicator size="large" />
+                <LogoLoader size={80} />
             </ThemedView>
         );
     }
@@ -77,8 +81,8 @@ const ProfileScreen = () => {
         <ThemedView style={styles.container}>
             <ScrollView contentContainerStyle={styles.scrollContent}>
                 <ProfileHeader userData={session ? profile : null} />
-                { !session && <GuestProfileView /> }
-                { session && <ProfileMenuList isLoggedIn={!!user} /> }
+                {!session && <GuestProfileView />}
+                {session && <ProfileMenuList isLoggedIn={!!user} />}
                 <ProfileSupportList />
                 <ProfileActionsList isLoggedIn={!!user} onLogout={signOut} />
             </ScrollView>
@@ -87,49 +91,49 @@ const ProfileScreen = () => {
 }
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-  },
-  scrollContent: {
-    paddingBottom: 200, 
-  },
-  centered: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  guestContainer: {
-    padding: 20,
-    alignItems: 'center',
-  },
-  guestTitle: {
-    marginBottom: 10,
-  },
-  guestText: {
-    textAlign: 'center',
-    marginBottom: 20,
-  },
-  guestButtons: {
-    flexDirection: 'row',
-  },
-  button: {
-    backgroundColor: '#1F2050',
-    borderRadius: 28,
-    paddingVertical: 16,
-    paddingHorizontal: 24,
-    alignItems: 'center',
-    shadowColor: '#1F2050',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.3,
-    shadowRadius: 8,
-    elevation: 5,
-  },
-  buttonText: {
-    color: '#fff',
-    fontSize: 18,
-    fontWeight: 'bold',
-    letterSpacing: 0.5,
-  },
+    container: {
+        flex: 1,
+    },
+    scrollContent: {
+        paddingBottom: 200,
+    },
+    centered: {
+        flex: 1,
+        justifyContent: 'center',
+        alignItems: 'center',
+    },
+    guestContainer: {
+        padding: 20,
+        alignItems: 'center',
+    },
+    guestTitle: {
+        marginBottom: 10,
+    },
+    guestText: {
+        textAlign: 'center',
+        marginBottom: 20,
+    },
+    guestButtons: {
+        flexDirection: 'row',
+    },
+    button: {
+        backgroundColor: '#1F2050',
+        borderRadius: 28,
+        paddingVertical: 16,
+        paddingHorizontal: 24,
+        alignItems: 'center',
+        shadowColor: '#1F2050',
+        shadowOffset: { width: 0, height: 4 },
+        shadowOpacity: 0.3,
+        shadowRadius: 8,
+        elevation: 5,
+    },
+    buttonText: {
+        color: '#fff',
+        fontSize: 18,
+        fontWeight: 'bold',
+        letterSpacing: 0.5,
+    },
 });
 
 export default ProfileScreen;

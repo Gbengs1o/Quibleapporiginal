@@ -34,14 +34,32 @@ export const useFoodFeed = (maxDistance: number = 15) => {
         try {
             const { status } = await Location.requestForegroundPermissionsAsync();
             if (status !== 'granted') { setLoading(false); return; }
-            
-            const loc = await Location.getCurrentPositionAsync({});
-            const coords = { latitude: loc.coords.latitude, longitude: loc.coords.longitude };
-            setUserLocation(coords);
-            
-            await fetchDishes(coords);
+
+            // Try last known location first for speed
+            let loc = await Location.getLastKnownPositionAsync({});
+
+            if (!loc) {
+                // If no last known, try current with timeout
+                try {
+                    loc = await Location.getCurrentPositionAsync({
+                        accuracy: Location.Accuracy.Balanced,
+                        timeout: 5000
+                    });
+                } catch (e) {
+                    console.warn("Could not retrieve current location, using default or skipping.");
+                }
+            }
+
+            if (loc) {
+                const coords = { latitude: loc.coords.latitude, longitude: loc.coords.longitude };
+                setUserLocation(coords);
+                await fetchDishes(coords);
+            } else {
+                // Fallback to Lagos or empty
+                setLoading(false);
+            }
         } catch (err) {
-            console.error("Location error:", err);
+            console.log("Location initialization error (handled):", err);
             setLoading(false);
         }
     };
@@ -52,10 +70,13 @@ export const useFoodFeed = (maxDistance: number = 15) => {
         const { data, error } = await supabase
             .from('menu_items')
             .select(`*, restaurant:restaurants!restaurant_id(*)`)
-            .order('id', { ascending: true }) 
+            .order('id', { ascending: true })
             .limit(50);
 
-        if (error) console.error("Fetch error:", error);
+        if (error) {
+            console.error("Fetch error (menu_items):", error.message || error);
+            // Optional: You could show a specialized empty state here
+        }
 
         if (data) {
             const processed = processDishes(data, coords);
@@ -79,8 +100,8 @@ export const useFoodFeed = (maxDistance: number = 15) => {
 
         const channel = supabase.channel('food_feed_live')
             .on(
-                'postgres_changes', 
-                { event: '*', schema: 'public', table: 'menu_items' }, 
+                'postgres_changes',
+                { event: '*', schema: 'public', table: 'menu_items' },
                 (payload) => {
                     console.log("⚡ UPDATE DETECTED:", payload.eventType);
                     handleSilentUpdate(payload);
@@ -123,26 +144,26 @@ export const useFoodFeed = (maxDistance: number = 15) => {
 
         setDishes(prev => {
             const index = prev.findIndex(d => d.id === newRecord.id);
-            
+
             // If it's new and not in list, add to top
             if (eventType === 'INSERT' && index === -1) {
                 return [updatedDish, ...prev];
             }
-            
+
             // If it exists, SWAP IT OUT perfectly
             if (index !== -1) {
                 const newArr = [...prev];
                 newArr[index] = updatedDish;
                 return newArr;
             }
-            
+
             return prev;
         });
     };
 
     const calculateDistance = (lat1: number, lon1: number, lat2: number, lon2: number) => {
         if (!lat2 || !lon2) return 9999;
-        const R = 6371; 
+        const R = 6371;
         const dLat = (lat2 - lat1) * Math.PI / 180;
         const dLon = (lon2 - lon1) * Math.PI / 180;
         const a = Math.sin(dLat / 2) * Math.sin(dLat / 2) + Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) * Math.sin(dLon / 2) * Math.sin(dLon / 2);

@@ -1,7 +1,9 @@
 import DeliveryCard from '@/components/DeliveryCard';
 import HomeCategories, { PriceRange, ServiceCategory, SortOption } from '@/components/HomeCategories';
 import HomeHeader from '@/components/HomeHeader';
+import LogoLoader from '@/components/LogoLoader';
 import NearbyDishes from '@/components/NearbyDishes';
+import NearbyRiders from '@/components/NearbyRiders';
 import SidePanel from '@/components/SidePanel';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
@@ -18,6 +20,7 @@ const HomeScreen = () => {
   const [isSidePanelOpen, setSidePanelOpen] = useState(false);
   const { user, isReady } = useAuth();
   const [profile, setProfile] = useState<any>(null);
+  const [loading, setLoading] = useState(true);
   const [selectedCategory, setSelectedCategory] = useState<ServiceCategory>('all');
   const [searchQuery, setSearchQuery] = useState('');
 
@@ -32,6 +35,12 @@ const HomeScreen = () => {
   const cartBadgeBg = useThemeColor({ light: '#ef4444', dark: '#ef4444' }, 'background');
 
   useEffect(() => {
+    if (isReady && !user) {
+      setProfile(null);
+      setLoading(false);
+      return;
+    }
+
     const fetchProfile = async () => {
       if (user) {
         try {
@@ -44,9 +53,9 @@ const HomeScreen = () => {
           setProfile(data);
         } catch (error) {
           console.error('Error fetching profile:', error);
+        } finally {
+          setLoading(false);
         }
-      } else {
-        setProfile(null);
       }
     };
 
@@ -54,6 +63,15 @@ const HomeScreen = () => {
       fetchProfile();
     }
   }, [user, isReady]);
+
+  // Show loading state like Profile tab
+  if (loading || !isReady) {
+    return (
+      <ThemedView style={styles.centered}>
+        <LogoLoader size={80} />
+      </ThemedView>
+    );
+  }
 
   const toggleSidePanel = () => {
     setSidePanelOpen(!isSidePanelOpen);
@@ -85,20 +103,7 @@ const HomeScreen = () => {
       />
 
       {/* Dynamic Content */}
-      {showDelivery && selectedCategory === 'delivery' && (
-        <View style={styles.comingSoonContainer}>
-          <DeliveryCard />
-          <View style={styles.comingSoon}>
-            <Ionicons name="bicycle" size={50} color={secondaryText} />
-            <ThemedText style={[styles.comingSoonTitle, { color: secondaryText }]}>
-              Delivery Services
-            </ThemedText>
-            <ThemedText style={[styles.comingSoonText, { color: secondaryText }]}>
-              Send packages and documents anywhere
-            </ThemedText>
-          </View>
-        </View>
-      )}
+
 
       {showHandy && (
         <View style={styles.comingSoon}>
@@ -138,7 +143,6 @@ const HomeScreen = () => {
       {showFood ? (
         // Case A: Food is visible. NearbyDishes is the main scroll container.
         <NearbyDishes
-          maxDistance={15}
           searchQuery={searchQuery}
           categoryFilter={dishCategoryFilter}
           sortBy={sortBy}
@@ -147,8 +151,14 @@ const HomeScreen = () => {
           ListHeaderComponent={renderHeaderContent()}
           contentContainerStyle={styles.scrollContent}
         />
+      ) : showDelivery && selectedCategory === 'delivery' ? (
+        // Case B: Delivery is visible. NearbyRiders is the main scroll container.
+        <NearbyRiders
+          ListHeaderComponent={renderHeaderContent()}
+          searchQuery={searchQuery}
+        />
       ) : (
-        // Case B: Food is NOT visible. Use standard ScrollView for other pages.
+        // Case C: Other (ScrollView)
         <ScrollView
           style={styles.scrollView}
           showsVerticalScrollIndicator={false}
@@ -184,6 +194,11 @@ const styles = StyleSheet.create({
   },
   scrollView: {
     flex: 1,
+  },
+  centered: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
   },
   scrollContent: {
     paddingBottom: 100,

@@ -2,9 +2,10 @@ import { useCart } from '@/contexts/cart';
 import { useThemeColor } from '@/hooks/use-theme-color';
 import { Dish, useFoodFeed } from '@/hooks/useFoodFeed';
 import { Ionicons } from '@expo/vector-icons';
+import { useRouter } from 'expo-router';
+import LottieView from 'lottie-react-native';
 import React, { memo, useCallback, useMemo } from 'react';
 import {
-    ActivityIndicator,
     Dimensions,
     FlatList,
     Image,
@@ -35,12 +36,22 @@ const DishCard = memo(({ item, onAdd, inCart, themeColors }: any) => {
 
     const isSoldOut = !item.is_active;
 
+    const router = useRouter();
+
+    const handlePress = () => {
+        router.push(`/dish/${item.id}`);
+    };
+
     return (
-        <View style={[
-            styles.dishCard,
-            { backgroundColor: themeColors.cardBg, borderColor: themeColors.borderColor },
-            isSoldOut && styles.dishCardDisabled
-        ]}>
+        <TouchableOpacity
+            activeOpacity={0.9}
+            onPress={handlePress}
+            style={[
+                styles.dishCard,
+                { backgroundColor: themeColors.cardBg, borderColor: themeColors.borderColor },
+                isSoldOut && styles.dishCardDisabled
+            ]}
+        >
             {/* Image Area */}
             <View style={styles.imageContainer}>
                 {item.image_url ? (
@@ -62,6 +73,14 @@ const DishCard = memo(({ item, onAdd, inCart, themeColors }: any) => {
             {/* Content Area */}
             <View style={styles.contentContainer}>
                 <View style={styles.restaurantRow}>
+                    {/* LOGO ADDITION */}
+                    {item.restaurant?.logo_url ? (
+                        <Image source={{ uri: item.restaurant.logo_url }} style={styles.restaurantLogo} />
+                    ) : (
+                        <View style={styles.restaurantLogoPlaceholder}>
+                            <Ionicons name="business" size={12} color="#fff" />
+                        </View>
+                    )}
                     <ThemedText style={[styles.restaurantName, { color: themeColors.secondaryText }]} numberOfLines={1}>
                         {item.restaurant?.name}
                     </ThemedText>
@@ -99,7 +118,7 @@ const DishCard = memo(({ item, onAdd, inCart, themeColors }: any) => {
                     </TouchableOpacity>
                 </View>
             </View>
-        </View>
+        </TouchableOpacity>
     );
 });
 
@@ -172,6 +191,11 @@ const NearbyDishes: React.FC<NearbyDishesProps> = ({
             result = result.filter(d => d.is_active);
         }
 
+        // 3. Restaurant Status (NEW: Hide if Closed)
+        // Ensure "restaurant" object exists and check is_open
+        // Note: Assuming is_open defaults to false if null, or handled by DB default
+        result = result.filter(d => d.restaurant && d.restaurant.is_open !== false);
+
         // 3. Price
         if (priceRange === 'budget') result = result.filter(d => d.price <= 2000);
         else if (priceRange === 'mid') result = result.filter(d => d.price > 2000 && d.price <= 5000);
@@ -200,7 +224,13 @@ const NearbyDishes: React.FC<NearbyDishesProps> = ({
         return (
             <View style={styles.centerLoader}>
                 {ListHeaderComponent}
-                <ActivityIndicator size="large" color="#f27c22" style={{ marginTop: 50 }} />
+                <LottieView
+                    source={{ uri: 'https://lottie.host/32460ed7-5572-49d4-9b11-8096eee3437b/TzG7GfevAR.lottie' }}
+                    style={{ width: 180, height: 180, marginTop: 30 }}
+                    autoPlay
+                    loop
+                />
+                <ThemedText style={{ marginTop: 10, opacity: 0.6 }}>Finding dishes near you...</ThemedText>
             </View>
         );
     }
@@ -253,8 +283,10 @@ const styles = StyleSheet.create({
     distanceBadge: { position: 'absolute', top: 12, left: 12, flexDirection: 'row', alignItems: 'center', backgroundColor: 'rgba(0,0,0,0.7)', paddingVertical: 5, paddingHorizontal: 10, borderRadius: 20, gap: 4 },
     distanceText: { color: '#fff', fontSize: 12, fontWeight: '600' },
     contentContainer: { padding: 16 },
-    restaurantRow: { flexDirection: 'row', alignItems: 'center', marginBottom: 10 },
-    restaurantName: { fontSize: 13 },
+    restaurantRow: { flexDirection: 'row', alignItems: 'center', marginBottom: 10, gap: 8 },
+    restaurantLogo: { width: 24, height: 24, borderRadius: 12, backgroundColor: '#eee' },
+    restaurantLogoPlaceholder: { width: 24, height: 24, borderRadius: 12, backgroundColor: '#ccc', justifyContent: 'center', alignItems: 'center' },
+    restaurantName: { fontSize: 13, flex: 1 },
     dishName: { fontSize: 18, fontWeight: '700', marginBottom: 6 },
     bottomRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-end' },
     priceLabel: { fontSize: 11, color: '#888', marginBottom: 2 },

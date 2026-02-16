@@ -1,7 +1,7 @@
 
+import TabBar from '@/components/TabBar';
 import { Tabs } from 'expo-router';
 import React from 'react';
-import TabBar from '@/components/TabBar';
 
 export default function TabLayout() {
   return (
@@ -16,12 +16,6 @@ export default function TabLayout() {
       <Tabs.Screen name="Search" />
       <Tabs.Screen name="Orders" />
       <Tabs.Screen name="Support" />
-      <Tabs.Screen
-        name="edit-profile"
-        options={{
-          href: null,
-        }}
-      />
     </Tabs>
   );
 }

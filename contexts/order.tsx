@@ -3,9 +3,46 @@ import { Audio } from 'expo-av';
 import React, { createContext, useContext, useEffect, useState } from 'react';
 import { useAuth } from './auth';
 
-export type OrderStatus = 'received' | 'preparing' | 'ready' | 'with_rider' | 'delivered' | 'cancelled';
+export type OrderStatus = 'received' | 'preparing' | 'ready' | 'with_rider' | 'out_for_delivery' | 'delivered' | 'cancelled';
 
-// ... (OrderItem, Order interfaces unchanged) ...
+export interface OrderItem {
+    id: string;
+    order_id: string;
+    menu_item_id: string;
+    quantity: number;
+    price_at_time: number;
+    options: string;
+    menu_item: {
+        id: string;
+        name: string;
+        price: number;
+        image_url?: string;
+    };
+}
+
+export interface Order {
+    id: string;
+    user_id: string;
+    restaurant_id: string;
+    status: OrderStatus;
+    total_amount: number;
+    delivery_fee?: number;
+    rider_id?: string;
+    pickup_latitude?: number;
+    pickup_longitude?: number;
+    dropoff_latitude?: number;
+    dropoff_longitude?: number;
+    delivery_code?: string;
+    created_at: string;
+    updated_at: string;
+    restaurant: {
+        id: string;
+        name: string;
+        image_url?: string;
+        address: string;
+    };
+    items: OrderItem[];
+}
 
 interface OrderContextType {
     activeOrders: Order[];
@@ -14,7 +51,17 @@ interface OrderContextType {
     loading: boolean;
     refreshOrders: () => Promise<void>;
     updateOrderStatus: (orderId: string, status: OrderStatus) => Promise<void>;
-    placeOrder: (restaurantId: string, totalAmount: number, items: { menu_item_id: string; quantity: number; price: number; options?: string }[]) => Promise<string>;
+    placeOrder: (
+        restaurantId: string,
+        totalAmount: number,
+        items: { menu_item_id: string; quantity: number; price: number; options?: string }[],
+        location?: {
+            pickup_lat?: number;
+            pickup_lng?: number;
+            dropoff_lat?: number;
+            dropoff_lng?: number;
+        }
+    ) => Promise<string>;
     cancelOrder: (orderId: string) => Promise<void>; // Added
 }
 
@@ -57,7 +104,7 @@ export function OrderProvider({ children }: { children: React.ReactNode }) {
                 .from('orders')
                 .select('*, restaurant:restaurants(*), items:order_items(*, menu_item:menu_items(*))')
                 .eq('user_id', user?.id)
-                .in('status', ['received', 'preparing', 'ready', 'with_rider'])
+                .in('status', ['received', 'preparing', 'ready', 'with_rider', 'out_for_delivery'])
                 .order('created_at', { ascending: false });
 
             if (userOrdersData) setActiveOrders(userOrdersData as any);
@@ -106,11 +153,25 @@ export function OrderProvider({ children }: { children: React.ReactNode }) {
         }
     };
 
-    const placeOrder = async (restaurantId: string, totalAmount: number, items: { menu_item_id: string; quantity: number; price: number; options?: string }[]) => {
+    const placeOrder = async (
+        restaurantId: string,
+        totalAmount: number,
+        items: { menu_item_id: string; quantity: number; price: number; options?: string }[],
+        location?: {
+            pickup_lat?: number;
+            pickup_lng?: number;
+            dropoff_lat?: number;
+            dropoff_lng?: number;
+        }
+    ) => {
         const { data, error } = await supabase.rpc('place_order', {
             p_restaurant_id: restaurantId,
             p_total_amount: totalAmount,
-            p_items: items
+            p_items: items,
+            p_pickup_lat: location?.pickup_lat,
+            p_pickup_lng: location?.pickup_lng,
+            p_dropoff_lat: location?.dropoff_lat,
+            p_dropoff_lng: location?.dropoff_lng
         });
 
         if (error) throw error;

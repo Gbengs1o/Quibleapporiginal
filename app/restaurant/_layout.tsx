@@ -1,31 +1,27 @@
-import RestaurantSidebar from '@/components/RestaurantSidebar';
-import { Drawer } from 'expo-router/drawer';
-import { GestureHandlerRootView } from 'react-native-gesture-handler';
+import CustomDrawerOverlay from '@/components/CustomDrawerOverlay';
+import StatusGuard from '@/components/StatusGuard';
+import { RestaurantMenuProvider } from '@/contexts/restaurant-menu';
+import { Stack } from 'expo-router';
 
 export default function RestaurantLayout() {
     return (
-        <GestureHandlerRootView style={{ flex: 1 }}>
-            <Drawer
-                drawerContent={(props) => <RestaurantSidebar {...props} />}
-                screenOptions={{
-                    headerShown: false,
-                    drawerStyle: {
-                        width: '80%',
-                    },
-                }}
-            >
-                <Drawer.Screen name="dashboard" options={{ title: 'Dashboard' }} />
-                <Drawer.Screen name="orders" options={{ title: 'Orders' }} />
-                <Drawer.Screen name="menu" options={{ title: 'Menu Management' }} />
-                <Drawer.Screen name="payments" options={{ title: 'Payments and Earning' }} />
-                <Drawer.Screen name="promotions" options={{ title: 'Promotions' }} />
-                <Drawer.Screen name="reviews" options={{ title: 'Reviews' }} />
-                <Drawer.Screen name="messages" options={{ title: 'Messages' }} />
-                <Drawer.Screen name="settings" options={{ title: 'Profile & Settings' }} />
-                <Drawer.Screen name="support" options={{ title: 'Support & Help' }} />
-                <Drawer.Screen name="wallet" options={{ title: 'Wallet' }} />
-                <Drawer.Screen name="analytics" options={{ title: 'Analytics' }} />
-            </Drawer>
-        </GestureHandlerRootView>
+        <RestaurantMenuProvider>
+            <StatusGuard type="restaurant">
+                <Stack screenOptions={{ headerShown: false }}>
+                    <Stack.Screen name="dashboard" />
+                    <Stack.Screen name="orders" />
+                    <Stack.Screen name="menu" />
+                    <Stack.Screen name="payments" />
+                    <Stack.Screen name="promotions" />
+                    <Stack.Screen name="reviews" />
+                    <Stack.Screen name="messages" />
+                    <Stack.Screen name="settings" />
+                    <Stack.Screen name="support" />
+                    <Stack.Screen name="wallet" />
+                    <Stack.Screen name="analytics" />
+                </Stack>
+                <CustomDrawerOverlay />
+            </StatusGuard>
+        </RestaurantMenuProvider>
     );
 }

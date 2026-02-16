@@ -1,10 +1,10 @@
-import React from 'react';
-import { View, StyleSheet, TouchableOpacity } from 'react-native';
-import { ThemedView } from './themed-view';
-import { ThemedText } from './themed-text';
 import { useThemeColor } from '@/hooks/use-theme-color';
-import { Feather, Ionicons, MaterialCommunityIcons, FontAwesome } from '@expo/vector-icons';
+import { Feather, FontAwesome, Ionicons } from '@expo/vector-icons';
 import { Link } from 'expo-router';
+import React from 'react';
+import { StyleSheet, TouchableOpacity, View } from 'react-native';
+import { ThemedText } from './themed-text';
+import { ThemedView } from './themed-view';
 
 const ProfileSupportList = () => {
   const iconColor = useThemeColor({ light: '#000', dark: '#fff' }, 'text');
@@ -18,19 +18,14 @@ const ProfileSupportList = () => {
       href: '/faqs' as const,
     },
     {
-      title: 'Contact Support',
-      icon: <MaterialCommunityIcons name="headset" size={24} color={iconColor} />,
-      href: '/contact-support' as const,
-    },
-    {
       title: 'Help and feedback',
       icon: <Ionicons name="help-buoy-outline" size={24} color={iconColor} />,
-      href: '/help-and-feedback' as const,
+      href: '/profile/feedback' as const,
     },
     {
-        title: 'Invite a friend',
-        icon: <Feather name="user-plus" size={24} color={iconColor} />,
-        href: '/invite-a-friend' as const,
+      title: 'Invite a friend',
+      icon: <Feather name="user-plus" size={24} color={iconColor} />,
+      href: '/invite-a-friend' as const,
     }
   ];
 

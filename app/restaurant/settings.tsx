@@ -1,13 +1,15 @@
+import FoodLoader from '@/components/FoodLoader';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { useAuth } from '@/contexts/auth';
+import { useRestaurantMenu } from '@/contexts/restaurant-menu';
+import { useThemeColor } from '@/hooks/use-theme-color';
 import { supabase } from '@/utils/supabase';
 import { Ionicons } from '@expo/vector-icons';
-import { DrawerActions } from '@react-navigation/native';
 import { decode } from 'base64-arraybuffer';
 import * as ImagePicker from 'expo-image-picker';
 import * as Location from 'expo-location';
-import { useNavigation } from 'expo-router';
+import { useNavigation, useRouter } from 'expo-router';
 import React, { useEffect, useState } from 'react';
 import {
     ActivityIndicator,
@@ -17,7 +19,7 @@ import {
     StyleSheet,
     TextInput,
     TouchableOpacity,
-    View
+    View,
 } from 'react-native';
 import MapView, { Marker, PROVIDER_GOOGLE } from 'react-native-maps';
 
@@ -38,8 +40,11 @@ interface RestaurantData {
 }
 
 export default function SettingsScreen() {
+    const router = useRouter();
     const navigation = useNavigation();
+    const { openMenu } = useRestaurantMenu();
     const { user } = useAuth();
+    const iconColor = useThemeColor({ light: '#1f2050', dark: '#fff' }, 'text');
     const [loading, setLoading] = useState(true);
     const [saving, setSaving] = useState(false);
     const [restaurant, setRestaurant] = useState<RestaurantData | null>(null);
@@ -247,6 +252,7 @@ export default function SettingsScreen() {
             const updates: any = {
                 name,
                 address,
+                phone: phoneNumber, // Update both columns to keep them in sync
                 phone_number: phoneNumber,
                 cuisine_type: cuisineType,
                 short_description: shortDescription || null,
@@ -287,29 +293,15 @@ export default function SettingsScreen() {
     };
 
     if (loading) {
-        return (
-            <ThemedView style={styles.container}>
-                <View style={styles.header}>
-                    <TouchableOpacity onPress={() => navigation.dispatch(DrawerActions.openDrawer())}>
-                        <Ionicons name="menu" size={24} color="#1f2050" />
-                    </TouchableOpacity>
-                    <ThemedText type="title">Profile & Settings</ThemedText>
-                    <View style={{ width: 24 }} />
-                </View>
-                <View style={styles.loadingContainer}>
-                    <ActivityIndicator size="large" color="#f27c22" />
-                    <ThemedText style={styles.loadingText}>Loading restaurant data...</ThemedText>
-                </View>
-            </ThemedView>
-        );
+        return <FoodLoader message="Loading restaurant data..." />;
     }
 
     if (!restaurant) {
         return (
             <ThemedView style={styles.container}>
                 <View style={styles.header}>
-                    <TouchableOpacity onPress={() => navigation.dispatch(DrawerActions.openDrawer())}>
-                        <Ionicons name="menu" size={24} color="#1f2050" />
+                    <TouchableOpacity onPress={openMenu}>
+                        <Ionicons name="menu" size={24} color={iconColor} />
                     </TouchableOpacity>
                     <ThemedText type="title">Profile & Settings</ThemedText>
                     <View style={{ width: 24 }} />
@@ -324,8 +316,8 @@ export default function SettingsScreen() {
     return (
         <ThemedView style={styles.container}>
             <View style={styles.header}>
-                <TouchableOpacity onPress={() => navigation.dispatch(DrawerActions.openDrawer())}>
-                    <Ionicons name="menu" size={24} color="#1f2050" />
+                <TouchableOpacity onPress={openMenu}>
+                    <Ionicons name="menu" size={24} color={iconColor} />
                 </TouchableOpacity>
                 <ThemedText type="title">Profile & Settings</ThemedText>
                 <View style={{ width: 24 }} />
@@ -412,6 +404,42 @@ export default function SettingsScreen() {
                             </MapView>
                         </View>
                     )}
+                </View>
+
+                {/* Finance Section */}
+                <View style={styles.section}>
+                    <ThemedText style={styles.sectionTitle}>Finance</ThemedText>
+                    <TouchableOpacity
+                        style={styles.walletButton}
+                        onPress={() => router.push('/restaurant/wallet')}
+                    >
+                        <View style={styles.walletIconContainer}>
+                            <Ionicons name="wallet-outline" size={24} color="#fff" />
+                        </View>
+                        <View style={styles.walletTextContainer}>
+                            <ThemedText style={styles.walletTitle}>Restaurant Wallet</ThemedText>
+                            <ThemedText style={styles.walletSubtitle}>Manage funds, transfers, and payouts</ThemedText>
+                        </View>
+                        <Ionicons name="chevron-forward" size={20} color={iconColor} />
+                    </TouchableOpacity>
+                </View>
+
+                {/* Feedback Section */}
+                <View style={styles.section}>
+                    <ThemedText style={styles.sectionTitle}>Support</ThemedText>
+                    <TouchableOpacity
+                        style={styles.walletButton}
+                        onPress={() => router.push('/profile/feedback')}
+                    >
+                        <View style={[styles.walletIconContainer, { backgroundColor: '#1F2050' }]}>
+                            <Ionicons name="chatbox-ellipses-outline" size={24} color="#fff" />
+                        </View>
+                        <View style={styles.walletTextContainer}>
+                            <ThemedText style={styles.walletTitle}>Help & Feedback</ThemedText>
+                            <ThemedText style={styles.walletSubtitle}>Report bugs or suggest improvements</ThemedText>
+                        </View>
+                        <Ionicons name="chevron-forward" size={20} color={iconColor} />
+                    </TouchableOpacity>
                 </View>
 
                 {/* Basic Information Section */}
@@ -719,5 +747,35 @@ const styles = StyleSheet.create({
     map: {
         width: '100%',
         height: '100%',
+    },
+    walletButton: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        padding: 16,
+        backgroundColor: 'rgba(242, 124, 34, 0.1)',
+        borderRadius: 12,
+        borderWidth: 1,
+        borderColor: 'rgba(242, 124, 34, 0.2)',
+    },
+    walletIconContainer: {
+        width: 44,
+        height: 44,
+        borderRadius: 22,
+        backgroundColor: '#f27c22',
+        justifyContent: 'center',
+        alignItems: 'center',
+        marginRight: 16,
+    },
+    walletTextContainer: {
+        flex: 1,
+    },
+    walletTitle: {
+        fontSize: 16,
+        fontWeight: '700',
+        marginBottom: 4,
+    },
+    walletSubtitle: {
+        fontSize: 13,
+        opacity: 0.7,
     },
 });

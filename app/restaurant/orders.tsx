@@ -1,24 +1,60 @@
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
+import { useCall } from '@/contexts/call-context';
 import { OrderStatus, useOrders } from '@/contexts/order';
+import { useRestaurantMenu } from '@/contexts/restaurant-menu';
+import { useTheme } from '@/hooks/use-theme';
+import { useThemeColor } from '@/hooks/use-theme-color';
+import { supabase } from '@/utils/supabase';
 import { Ionicons } from '@expo/vector-icons';
-import { DrawerActions } from '@react-navigation/native';
-import { useNavigation } from 'expo-router';
+import { LinearGradient } from 'expo-linear-gradient';
+import { useRouter } from 'expo-router';
+import LottieView from 'lottie-react-native';
 import React from 'react';
-import { Alert, FlatList, RefreshControl, StyleSheet, TouchableOpacity, View } from 'react-native';
+import {
+    Alert,
+    FlatList,
+    Modal,
+    RefreshControl,
+    StyleSheet,
+    TextInput,
+    TouchableOpacity,
+    View
+} from 'react-native';
 
-const STATUS_ACTIONS: Record<OrderStatus, { label: string, next: OrderStatus, color: string } | null> = {
-    'received': { label: 'Accept & Prepare', next: 'preparing', color: '#f59e0b' },
-    'preparing': { label: 'Mark Ready', next: 'ready', color: '#22c55e' },
-    'ready': { label: 'Hand to Rider', next: 'with_rider', color: '#3b82f6' },
-    'with_rider': { label: 'Product Delivered', next: 'delivered', color: '#6366f1' },
+
+
+
+const STATUS_ACTIONS: Record<OrderStatus, { label: string, next: OrderStatus, color: string, icon: string, isSpecial?: boolean, isVerify?: boolean } | null> = {
+    'received': { label: 'Accept & Prepare', next: 'preparing', color: '#f59e0b', icon: 'flame' },
+    'preparing': { label: 'Mark Ready', next: 'ready', color: '#22c55e', icon: 'checkmark-circle' },
+    'ready': { label: 'Assign Rider', next: 'with_rider', color: '#3b82f6', icon: 'bicycle', isSpecial: true },
+    'with_rider': { label: 'Verify Pickup', next: 'out_for_delivery', color: '#8b5cf6', icon: 'shield-checkmark', isSpecial: true, isVerify: true }, // Verified Secure Handoff
+    'out_for_delivery': null, // Rider completes this
     'delivered': null,
     'cancelled': null
 };
 
 export default function OrdersScreen() {
-    const navigation = useNavigation();
+    const { openMenu } = useRestaurantMenu();
+    const router = useRouter();
+    const { startCall } = useCall();
     const { restaurantOrders, refreshOrders, updateOrderStatus, cancelOrder, loading } = useOrders();
+    const { theme } = useTheme();
+    const isDark = theme === 'dark';
+
+    // Theme-aware colors
+    const iconColor = useThemeColor({ light: '#1f2050', dark: '#fff' }, 'text');
+    const cardBg = useThemeColor({ light: '#ffffff', dark: '#1E1E1E' }, 'background');
+    const borderColor = useThemeColor({ light: '#e5e7eb', dark: '#333' }, 'text');
+    const subtleText = useThemeColor({ light: '#6b7280', dark: '#9ca3af' }, 'text');
+    const itemRowBg = useThemeColor({ light: '#f9fafb', dark: '#2a2a2a' }, 'background');
+
+    // Verify Modal State
+    const [showVerifyModal, setShowVerifyModal] = React.useState(false);
+    const [verifyCode, setVerifyCode] = React.useState('');
+    const [verifyOrderId, setVerifyOrderId] = React.useState<string | null>(null);
+    const [verifying, setVerifying] = React.useState(false);
 
     const handleAction = async (orderId: string, nextStatus: OrderStatus) => {
         await updateOrderStatus(orderId, nextStatus);
@@ -45,55 +81,139 @@ export default function OrdersScreen() {
         );
     };
 
+    const getStatusColor = (status: string) => {
+        switch (status) {
+            case 'received': return '#ef4444';
+            case 'preparing': return '#f59e0b';
+            case 'ready': return '#22c55e';
+            case 'with_rider': return '#3b82f6';
+            case 'delivered': return '#10b981';
+            default: return '#888';
+        }
+    };
+
+    const getStatusIcon = (status: string) => {
+        switch (status) {
+            case 'received': return 'alert-circle';
+            case 'preparing': return 'flame';
+            case 'ready': return 'checkmark-circle';
+            case 'with_rider': return 'bicycle';
+            case 'delivered': return 'checkmark-done-circle';
+            default: return 'help-circle';
+        }
+    };
+
     const renderOrderItem = ({ item: order }: { item: any }) => {
         const action = STATUS_ACTIONS[order.status as OrderStatus];
+        const statusColor = getStatusColor(order.status);
 
         return (
-            <View style={styles.card}>
+            <View style={[styles.card, { backgroundColor: cardBg, borderColor }]}>
+                {/* Status Ribbon */}
+                <View style={[styles.statusRibbon, { backgroundColor: statusColor }]}>
+                    <Ionicons name={getStatusIcon(order.status) as any} size={14} color="#fff" />
+                    <ThemedText style={styles.statusRibbonText}>
+                        {order.status.toUpperCase().replace('_', ' ')}
+                    </ThemedText>
+                </View>
+
+                {/* Card Header */}
                 <View style={styles.cardHeader}>
-                    <ThemedText style={styles.orderId}>#{order.id.slice(0, 8)}</ThemedText>
-                    <View style={[styles.statusBadge, { backgroundColor: getStatusColor(order.status) + '20' }]}>
-                        <ThemedText style={{ color: getStatusColor(order.status), fontWeight: 'bold', fontSize: 12 }}>
-                            {order.status.toUpperCase().replace('_', ' ')}
+                    <View>
+                        <ThemedText style={[styles.orderId, { color: subtleText }]}>Order ID</ThemedText>
+                        <ThemedText style={styles.orderIdValue}>#{order.id.slice(0, 8).toUpperCase()}</ThemedText>
+                    </View>
+                    <View style={styles.timeContainer}>
+                        <Ionicons name="time-outline" size={14} color={subtleText} />
+                        <ThemedText style={[styles.timeText, { color: subtleText }]}>
+                            {new Date(order.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                         </ThemedText>
                     </View>
                 </View>
 
-                <View style={styles.itemsList}>
+                {/* Items List */}
+                <View style={[styles.itemsList, { borderColor }]}>
                     {order.items?.map((item: any, idx: number) => (
-                        <View key={idx} style={styles.itemRow}>
-                            <View style={styles.quantityBadge}>
-                                <ThemedText style={{ color: '#fff', fontSize: 12, fontWeight: 'bold' }}>{item.quantity}x</ThemedText>
+                        <View key={idx} style={[styles.itemRow, { backgroundColor: itemRowBg }]}>
+                            <View style={[styles.quantityBadge, { backgroundColor: statusColor }]}>
+                                <ThemedText style={styles.quantityText}>{item.quantity}x</ThemedText>
                             </View>
-                            <View style={{ flex: 1, marginLeft: 10 }}>
-                                <ThemedText style={{ fontWeight: '600' }}>{item.menu_item?.name}</ThemedText>
-                                {item.options ? <ThemedText style={{ fontSize: 12, color: '#666' }}>{item.options}</ThemedText> : null}
+                            <View style={styles.itemInfo}>
+                                <ThemedText style={styles.itemName}>{item.menu_item?.name}</ThemedText>
+                                {item.options && (
+                                    <ThemedText style={[styles.itemOptions, { color: subtleText }]}>
+                                        {item.options}
+                                    </ThemedText>
+                                )}
                             </View>
-                            <ThemedText>₦{(item.price_at_time * item.quantity).toLocaleString()}</ThemedText>
+                            <ThemedText style={styles.itemPrice}>
+                                ₦{(item.price_at_time * item.quantity).toLocaleString()}
+                            </ThemedText>
                         </View>
                     ))}
                 </View>
 
+                {/* Footer */}
                 <View style={styles.footer}>
-                    <ThemedText style={{ fontSize: 16, fontWeight: 'bold' }}>Total: ₦{order.total_amount.toLocaleString()}</ThemedText>
+                    {/* Total Row */}
+                    <View style={styles.totalRow}>
+                        <ThemedText style={[styles.totalLabel, { color: subtleText }]}>Order Total</ThemedText>
+                        <ThemedText style={styles.totalValue}>₦{order.total_amount.toLocaleString()}</ThemedText>
+                    </View>
 
-                    <View style={{ flexDirection: 'row', gap: 10 }}>
+                    {/* Action Buttons - Full Width */}
+                    <View style={styles.actionButtonsRow}>
                         {(order.status === 'received' || order.status === 'preparing') && (
                             <TouchableOpacity
-                                style={[styles.actionButton, { backgroundColor: '#ef4444', paddingHorizontal: 12 }]}
+                                style={styles.cancelButton}
                                 onPress={() => handleCancel(order.id)}
+                                activeOpacity={0.8}
                             >
-                                <Ionicons name="close-circle" size={20} color="#fff" />
+                                <Ionicons name="close-circle" size={18} color="#dc2626" />
+                                <ThemedText style={styles.cancelButtonText}>Reject</ThemedText>
                             </TouchableOpacity>
                         )}
 
+                        {/* Call Rider Button (Only when rider is assigned) */}
+                        {((order.status === 'with_rider' || order.status === 'out_for_delivery') && order.rider_id) && (
+                            <TouchableOpacity
+                                style={styles.callButton}
+                                onPress={() => startCall(order.rider_id!)}
+                                activeOpacity={0.8}
+                            >
+                                <Ionicons name="call" size={20} color="#fff" />
+                            </TouchableOpacity>
+                        )}
+
+
                         {action && (
                             <TouchableOpacity
-                                style={[styles.actionButton, { backgroundColor: action.color }]}
-                                onPress={() => handleAction(order.id, action.next)}
+                                style={styles.actionButton}
+                                onPress={() => {
+                                    if (action.isSpecial) {
+                                        if (action.isVerify) {
+                                            setVerifyOrderId(order.id);
+                                            setVerifyCode('');
+                                            setShowVerifyModal(true);
+                                        } else {
+                                            // Navigate to rider selection page
+                                            router.push(`/restaurant/select-rider?orderId=${order.id}`);
+                                        }
+                                    } else {
+                                        handleAction(order.id, action.next);
+                                    }
+                                }}
+                                activeOpacity={0.85}
                             >
-                                <ThemedText style={{ color: '#fff', fontWeight: 'bold' }}>{action.label}</ThemedText>
-                                <Ionicons name="arrow-forward" size={16} color="#fff" style={{ marginLeft: 5 }} />
+                                <LinearGradient
+                                    colors={[action.color, shadeColor(action.color, -30)]}
+                                    start={{ x: 0, y: 0 }}
+                                    end={{ x: 1, y: 0 }}
+                                    style={styles.actionButtonGradient}
+                                >
+                                    <Ionicons name={action.icon as any} size={20} color="#fff" />
+                                    <ThemedText style={styles.actionButtonText}>{action.label}</ThemedText>
+                                </LinearGradient>
                             </TouchableOpacity>
                         )}
                     </View>
@@ -102,59 +222,442 @@ export default function OrdersScreen() {
         );
     };
 
-    const getStatusColor = (status: string) => {
-        switch (status) {
-            case 'received': return '#ef4444'; // Red for urgency
-            case 'preparing': return '#f59e0b'; // Orange
-            case 'ready': return '#22c55e'; // Green
-            case 'with_rider': return '#3b82f6'; // Blue
-            default: return '#888';
-        }
-    };
-
     return (
         <ThemedView style={styles.container}>
-            <View style={styles.header}>
-                <TouchableOpacity onPress={() => navigation.dispatch(DrawerActions.openDrawer())}>
-                    <Ionicons name="menu" size={30} color="#1f2050" />
+            {/* Header */}
+            <LinearGradient
+                colors={isDark ? ['#1f2050', '#1a1a2e'] : ['#1f2050', '#2d2d6e']}
+                style={styles.headerGradient}
+            >
+                <TouchableOpacity style={styles.menuButton} onPress={openMenu}>
+                    <Ionicons name="menu" size={28} color="#fff" />
                 </TouchableOpacity>
-                <ThemedText type="title" style={styles.title}>Incoming Orders</ThemedText>
-                <View style={{ width: 30 }} />
-            </View>
+                <View style={styles.headerContent}>
+                    <ThemedText style={styles.headerTitle}>Incoming Orders</ThemedText>
+                    <ThemedText style={styles.headerSubtitle}>
+                        {restaurantOrders.length > 0 ? `${restaurantOrders.length} active` : 'No active orders'}
+                    </ThemedText>
+                </View>
+                <View style={styles.headerBadge}>
+                    <ThemedText style={styles.headerBadgeText}>{restaurantOrders.length}</ThemedText>
+                </View>
+            </LinearGradient>
 
+            {/* Orders List */}
             <FlatList
                 data={restaurantOrders}
                 renderItem={renderOrderItem}
                 keyExtractor={item => item.id}
-                contentContainerStyle={{ padding: 20 }}
-                refreshControl={<RefreshControl refreshing={loading} onRefresh={refreshOrders} />}
+                contentContainerStyle={styles.listContent}
+                refreshControl={
+                    <RefreshControl
+                        refreshing={loading}
+                        onRefresh={refreshOrders}
+                        tintColor="#f27c22"
+                        colors={['#f27c22']}
+                    />
+                }
                 ListEmptyComponent={
                     <View style={styles.emptyState}>
-                        <Ionicons name="notifications-off-outline" size={48} color="#ccc" />
-                        <ThemedText style={{ marginTop: 10, color: '#888' }}>No active orders.</ThemedText>
+                        <LottieView
+                            source={{ uri: 'https://lottie.host/32460ed7-5572-49d4-9b11-8096eee3437b/TzG7GfevAR.lottie' }}
+                            style={styles.emptyAnimation}
+                            autoPlay
+                            loop
+                        />
+                        <ThemedText style={styles.emptyTitle}>No Active Orders</ThemedText>
+                        <ThemedText style={[styles.emptySubtitle, { color: subtleText }]}>
+                            Pull down to refresh when you're expecting orders
+                        </ThemedText>
                     </View>
                 }
             />
+
+            {/* Verify Pickup Modal */}
+            <Modal
+                visible={showVerifyModal}
+                transparent
+                animationType="fade"
+                onRequestClose={() => setShowVerifyModal(false)}
+            >
+                <View style={styles.modalOverlay}>
+                    <View style={[styles.modalContent, { backgroundColor: cardBg }]}>
+                        <ThemedText style={styles.modalTitle}>Verify Pickup</ThemedText>
+                        <ThemedText style={[styles.modalSubtitle, { color: subtleText }]}>
+                            Enter the 4-digit code shown on the rider's phone to confirm handoff.
+                        </ThemedText>
+
+                        <TextInput
+                            style={[
+                                styles.codeInput,
+                                { color: iconColor, borderColor: borderColor, backgroundColor: isDark ? '#2a2a2a' : '#f9fafb' }
+                            ]}
+                            value={verifyCode}
+                            onChangeText={setVerifyCode}
+                            placeholder="0000"
+                            placeholderTextColor="#999"
+                            keyboardType="number-pad"
+                            maxLength={4}
+                        />
+
+                        <View style={styles.modalButtons}>
+                            <TouchableOpacity
+                                style={styles.modalCancelButton}
+                                onPress={() => setShowVerifyModal(false)}
+                            >
+                                <ThemedText style={{ color: subtleText, fontWeight: '600' }}>Cancel</ThemedText>
+                            </TouchableOpacity>
+                            <TouchableOpacity
+                                style={[styles.modalVerifyButton, { opacity: verifyCode.length === 4 ? 1 : 0.5 }]}
+                                disabled={verifyCode.length !== 4 || verifying}
+                                onPress={async () => {
+                                    if (!verifyOrderId) return;
+                                    setVerifying(true);
+
+                                    const { data, error } = await supabase.rpc('verify_order_pickup', {
+                                        p_order_id: verifyOrderId,
+                                        p_code: verifyCode
+                                    });
+
+                                    setVerifying(false);
+
+                                    if (error) {
+                                        Alert.alert('Error', error.message);
+                                    } else {
+                                        if (data?.success) {
+                                            Alert.alert('Success', 'Pickup Verified!');
+                                            setShowVerifyModal(false);
+                                            // Refresh orders
+                                            refreshOrders();
+                                        } else {
+                                            Alert.alert('Error', data?.message || 'Verification Failed');
+                                        }
+                                    }
+                                }}
+                            >
+                                <ThemedText style={{ color: '#fff', fontWeight: 'bold' }}>Verify</ThemedText>
+                            </TouchableOpacity>
+                        </View>
+                    </View>
+                </View>
+            </Modal>
         </ThemedView>
     );
 }
 
+// ... helper ...
+function shadeColor(color: string, percent: number): string {
+    const num = parseInt(color.replace('#', ''), 16);
+    const amt = Math.round(2.55 * percent);
+    const R = (num >> 16) + amt;
+    const G = (num >> 8 & 0x00FF) + amt;
+    const B = (num & 0x0000FF) + amt;
+    return '#' + (0x1000000 + (R < 255 ? R < 1 ? 0 : R : 255) * 0x10000 + (G < 255 ? G < 1 ? 0 : G : 255) * 0x100 + (B < 255 ? B < 1 ? 0 : B : 255)).toString(16).slice(1);
+}
+
 const styles = StyleSheet.create({
-    container: { flex: 1 },
-    header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 20, paddingTop: 50, paddingBottom: 20 },
-    title: { fontSize: 20, fontWeight: 'bold' },
-
-    card: { backgroundColor: '#fff', borderRadius: 16, padding: 16, marginBottom: 16, shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.1, shadowRadius: 4, elevation: 3 },
-    cardHeader: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 16 },
-    orderId: { fontWeight: 'bold', color: '#888' },
-    statusBadge: { paddingHorizontal: 8, paddingVertical: 4, borderRadius: 8 },
-
-    itemsList: { borderTopWidth: 1, borderBottomWidth: 1, borderColor: '#f0f0f0', paddingVertical: 10, marginBottom: 10 },
-    itemRow: { flexDirection: 'row', alignItems: 'center', marginBottom: 8 },
-    quantityBadge: { backgroundColor: '#1f2050', width: 24, height: 24, borderRadius: 12, justifyContent: 'center', alignItems: 'center' },
-
-    footer: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
-    actionButton: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 16, paddingVertical: 10, borderRadius: 25 },
-
-    emptyState: { alignItems: 'center', marginTop: 100 }
+    container: {
+        flex: 1,
+    },
+    headerGradient: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        paddingTop: 50,
+        paddingBottom: 20,
+        paddingHorizontal: 20,
+        borderBottomLeftRadius: 24,
+        borderBottomRightRadius: 24,
+    },
+    menuButton: {
+        width: 44,
+        height: 44,
+        borderRadius: 12,
+        backgroundColor: 'rgba(255,255,255,0.15)',
+        justifyContent: 'center',
+        alignItems: 'center',
+    },
+    headerContent: {
+        flex: 1,
+        marginLeft: 16,
+    },
+    headerTitle: {
+        fontSize: 22,
+        fontWeight: 'bold',
+        color: '#fff',
+    },
+    headerSubtitle: {
+        fontSize: 13,
+        color: 'rgba(255,255,255,0.7)',
+        marginTop: 2,
+    },
+    headerBadge: {
+        backgroundColor: '#f27c22',
+        width: 36,
+        height: 36,
+        borderRadius: 18,
+        justifyContent: 'center',
+        alignItems: 'center',
+    },
+    headerBadgeText: {
+        color: '#fff',
+        fontWeight: 'bold',
+        fontSize: 16,
+    },
+    listContent: {
+        padding: 16,
+        paddingBottom: 100,
+    },
+    card: {
+        borderRadius: 20,
+        marginBottom: 16,
+        borderWidth: 1,
+        overflow: 'hidden',
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 4 },
+        shadowOpacity: 0.1,
+        shadowRadius: 12,
+        elevation: 5,
+    },
+    statusRibbon: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'center',
+        paddingVertical: 8,
+        gap: 6,
+    },
+    statusRibbonText: {
+        color: '#fff',
+        fontSize: 12,
+        fontWeight: 'bold',
+        letterSpacing: 0.5,
+    },
+    cardHeader: {
+        flexDirection: 'row',
+        justifyContent: 'space-between',
+        alignItems: 'flex-start',
+        padding: 16,
+        paddingBottom: 12,
+    },
+    orderId: {
+        fontSize: 11,
+        textTransform: 'uppercase',
+        letterSpacing: 0.5,
+    },
+    orderIdValue: {
+        fontSize: 16,
+        fontWeight: 'bold',
+        marginTop: 2,
+    },
+    timeContainer: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 4,
+    },
+    timeText: {
+        fontSize: 13,
+    },
+    itemsList: {
+        borderTopWidth: 1,
+        borderBottomWidth: 1,
+        marginHorizontal: 16,
+        paddingVertical: 12,
+        gap: 8,
+    },
+    itemRow: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        padding: 10,
+        borderRadius: 12,
+    },
+    quantityBadge: {
+        width: 28,
+        height: 28,
+        borderRadius: 8,
+        justifyContent: 'center',
+        alignItems: 'center',
+    },
+    quantityText: {
+        color: '#fff',
+        fontSize: 12,
+        fontWeight: 'bold',
+    },
+    itemInfo: {
+        flex: 1,
+        marginLeft: 12,
+    },
+    itemName: {
+        fontSize: 14,
+        fontWeight: '600',
+    },
+    itemOptions: {
+        fontSize: 12,
+        marginTop: 2,
+    },
+    itemPrice: {
+        fontSize: 14,
+        fontWeight: '600',
+    },
+    footer: {
+        padding: 16,
+        paddingTop: 12,
+        gap: 14,
+    },
+    totalRow: {
+        flexDirection: 'row',
+        justifyContent: 'space-between',
+        alignItems: 'center',
+        paddingBottom: 12,
+        borderBottomWidth: 1,
+        borderBottomColor: 'rgba(0,0,0,0.06)',
+    },
+    totalLabel: {
+        fontSize: 13,
+        fontWeight: '500',
+    },
+    totalValue: {
+        fontSize: 22,
+        fontWeight: 'bold',
+    },
+    actionButtonsRow: {
+        flexDirection: 'row',
+        gap: 10,
+    },
+    cancelButton: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'center',
+        gap: 6,
+        paddingHorizontal: 16,
+        paddingVertical: 14,
+        borderWidth: 2,
+        borderColor: '#dc2626',
+        borderRadius: 14,
+        backgroundColor: 'rgba(220, 38, 38, 0.05)',
+    },
+    callButton: {
+        width: 50,
+        justifyContent: 'center',
+        alignItems: 'center',
+        backgroundColor: '#22c55e',
+        borderRadius: 14,
+        shadowColor: '#22c55e',
+        shadowOffset: { width: 0, height: 4 },
+        shadowOpacity: 0.3,
+        shadowRadius: 8,
+        elevation: 4,
+    },
+    cancelButtonText: {
+        color: '#dc2626',
+        fontWeight: '700',
+        fontSize: 14,
+    },
+    actionButton: {
+        flex: 1,
+        borderRadius: 14,
+        overflow: 'hidden',
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 4 },
+        shadowOpacity: 0.15,
+        shadowRadius: 8,
+        elevation: 4,
+    },
+    actionButtonGradient: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'center',
+        paddingVertical: 14,
+        gap: 10,
+    },
+    actionButtonText: {
+        color: '#fff',
+        fontWeight: 'bold',
+        fontSize: 15,
+    },
+    emptyState: {
+        alignItems: 'center',
+        marginTop: 80,
+        paddingHorizontal: 40,
+    },
+    emptyAnimation: {
+        width: 180,
+        height: 180,
+    },
+    emptyTitle: {
+        fontSize: 18,
+        fontWeight: 'bold',
+        marginTop: 16,
+    },
+    emptySubtitle: {
+        fontSize: 14,
+        textAlign: 'center',
+        marginTop: 8,
+        lineHeight: 20,
+    },
+    // Modal Styles
+    modalOverlay: {
+        flex: 1,
+        backgroundColor: 'rgba(0,0,0,0.5)',
+        justifyContent: 'center',
+        alignItems: 'center',
+        padding: 20,
+    },
+    modalContent: {
+        width: '100%',
+        maxWidth: 340,
+        borderRadius: 24,
+        padding: 24,
+        alignItems: 'center',
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 10 },
+        shadowOpacity: 0.25,
+        shadowRadius: 20,
+        elevation: 10,
+    },
+    modalTitle: {
+        fontSize: 20,
+        fontWeight: 'bold',
+        marginBottom: 8,
+    },
+    modalSubtitle: {
+        fontSize: 14,
+        textAlign: 'center',
+        marginBottom: 20,
+        lineHeight: 20,
+    },
+    codeInput: {
+        width: '100%',
+        height: 60,
+        borderRadius: 12,
+        borderWidth: 1,
+        fontSize: 24,
+        fontWeight: 'bold',
+        textAlign: 'center',
+        letterSpacing: 8,
+        marginBottom: 24,
+    },
+    modalButtons: {
+        flexDirection: 'row',
+        gap: 12,
+        width: '100%',
+    },
+    modalCancelButton: {
+        flex: 1,
+        height: 50,
+        justifyContent: 'center',
+        alignItems: 'center',
+        borderRadius: 12,
+    },
+    modalVerifyButton: {
+        flex: 1,
+        height: 50,
+        backgroundColor: '#8b5cf6',
+        justifyContent: 'center',
+        alignItems: 'center',
+        borderRadius: 12,
+        shadowColor: '#8b5cf6',
+        shadowOffset: { width: 0, height: 4 },
+        shadowOpacity: 0.3,
+        shadowRadius: 8,
+        elevation: 4,
+    },
 });

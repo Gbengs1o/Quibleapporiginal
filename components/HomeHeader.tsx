@@ -1,21 +1,23 @@
-import React, { useState, useEffect } from 'react';
-import { 
-  View, 
-  Text, 
-  StyleSheet, 
-  Image, 
-  TouchableOpacity,
-  Dimensions,
-  Switch,
-  Modal,
-  Alert
-} from 'react-native';
+import { useAuth } from '@/contexts/auth'; // Added
+import { supabase } from '@/utils/supabase'; // Added
 import { Ionicons } from '@expo/vector-icons';
-import Svg, { Path } from 'react-native-svg';
-import { useRouter } from 'expo-router';
-import QuibbleLogo from './QuibbleLogo';
 import * as Location from 'expo-location';
+import { useRouter } from 'expo-router';
+import React, { useEffect, useState } from 'react';
+import {
+  Alert,
+  Dimensions,
+  Image,
+  Modal,
+  StyleSheet,
+  Switch,
+  Text,
+  TouchableOpacity,
+  View
+} from 'react-native';
+import Svg, { Path } from 'react-native-svg';
 import LocationPermissionRequest from './LocationPermissionRequest';
+import QuibbleLogo from './QuibbleLogo';
 
 const { width } = Dimensions.get('window');
 
@@ -28,7 +30,62 @@ const HomeHeader: React.FC<HomeHeaderProps> = ({ onMenuPress, profile }) => {
   const router = useRouter();
   const [location, setLocation] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
-  const [permissionStatus, setPermissionStatus] = useState<'undetermined' | 'granted' | 'denied'>('undetermined');
+  const [permissionStatus, setPermissionStatus] = useState<'undetermined' | 'granted' | 'denied' | null>(null);
+  const [isCheckingPermission, setIsCheckingPermission] = useState(true);
+
+  // Notification Badge State
+  const { user } = useAuth();
+  const [hasUnread, setHasUnread] = useState(false);
+  const [badgeColor, setBadgeColor] = useState('#FF4444');
+
+  useEffect(() => {
+    if (!user) {
+      setHasUnread(false);
+      return;
+    }
+
+    const fetchUnread = async () => {
+      const { data, error } = await supabase
+        .from('notifications')
+        .select('meta_data, type')
+        .eq('user_id', user.id)
+        .eq('is_read', false)
+        .order('created_at', { ascending: false })
+        .limit(1);
+
+      if (data && data.length > 0) {
+        setHasUnread(true);
+        const latest = data[0];
+        // Determine color
+        let color = '#FF4444'; // default
+        if (latest.meta_data?.color) {
+          color = latest.meta_data.color;
+        } else if (latest.type === 'wallet') {
+          color = '#F4821F';
+        } else if (latest.type === 'order') {
+          color = '#2196F3';
+        }
+        setBadgeColor(color);
+      } else {
+        setHasUnread(false);
+      }
+    };
+
+    fetchUnread();
+
+    // Subscribe to new notifications for realtime update
+    const subscription = supabase
+      .channel('public:notifications')
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'notifications', filter: `user_id=eq.${user.id}` }, payload => {
+        fetchUnread();
+      })
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(subscription);
+    };
+
+  }, [user]);
 
   const fetchLocation = async () => {
     setLoading(true);
@@ -43,17 +100,22 @@ const HomeHeader: React.FC<HomeHeaderProps> = ({ onMenuPress, profile }) => {
   };
 
   const checkPermission = async () => {
-    const { status } = await Location.getForegroundPermissionsAsync();
-    if (status === 'granted') {
-      setPermissionStatus('granted');
-      fetchLocation();
-    } else if (status === 'denied') {
-      setPermissionStatus('denied');
-      setLocation('Location permission denied');
-      setLoading(false);
-    } else {
-      setPermissionStatus('undetermined');
-      setLoading(false);
+    setIsCheckingPermission(true);
+    try {
+      const { status } = await Location.getForegroundPermissionsAsync();
+      if (status === 'granted') {
+        setPermissionStatus('granted');
+        fetchLocation();
+      } else if (status === 'denied') {
+        setPermissionStatus('denied');
+        setLocation('Location permission denied');
+        setLoading(false);
+      } else {
+        setPermissionStatus('undetermined');
+        setLoading(false);
+      }
+    } finally {
+      setIsCheckingPermission(false);
     }
   };
 
@@ -92,16 +154,16 @@ const HomeHeader: React.FC<HomeHeaderProps> = ({ onMenuPress, profile }) => {
   return (
     <View style={styles.wrapper}>
       <Modal
-        visible={permissionStatus === 'undetermined'}
+        visible={!isCheckingPermission && permissionStatus === 'undetermined'}
         animationType="slide"
-        onRequestClose={() => {}}
+        onRequestClose={() => { }}
       >
         <LocationPermissionRequest onGrantPermission={handleGrantPermission} onSkip={handleSkip} />
       </Modal>
       {/* SVG Curved Background */}
-      <Svg 
-        height="200" 
-        width={width} 
+      <Svg
+        height="200"
+        width={width}
         style={styles.svgCurve}
         viewBox={`0 0 ${width} 200`}
       >
@@ -110,11 +172,11 @@ const HomeHeader: React.FC<HomeHeaderProps> = ({ onMenuPress, profile }) => {
           fill="#1F2051"
         />
       </Svg>
-      
+
       {/* Content Layer */}
       <View style={styles.contentRow}>
         {/* Left: Menu Button */}
-        <TouchableOpacity 
+        <TouchableOpacity
           style={styles.buttonContainer}
           onPress={onMenuPress}
         >
@@ -136,10 +198,10 @@ const HomeHeader: React.FC<HomeHeaderProps> = ({ onMenuPress, profile }) => {
               <Text style={styles.locationToggleText}>Turn on location for a proper experience</Text>
               <Switch
                 trackColor={{ false: '#767577', true: '#81b0ff' }}
-                thumbColor={permissionStatus === 'granted' ? '#f5dd4b' : '#f4f3f4'}
+                thumbColor={'#f4f3f4'}
                 ios_backgroundColor="#3e3e3e"
                 onValueChange={handleGrantPermission}
-                value={permissionStatus === 'granted'}
+                value={false}
               />
             </View>
           )}
@@ -147,19 +209,19 @@ const HomeHeader: React.FC<HomeHeaderProps> = ({ onMenuPress, profile }) => {
 
         {/* Right: Bell & Avatar */}
         <View style={styles.rightSection}>
-          <TouchableOpacity 
+          <TouchableOpacity
             style={styles.bellButton}
             onPress={() => router.push('/notifications')}
           >
             <Ionicons name="notifications" size={24} color="#FFFFFF" />
-            <View style={styles.notificationDot} />
+            {hasUnread && <View style={[styles.notificationDot, { backgroundColor: badgeColor }]} />}
           </TouchableOpacity>
-          
+
           <TouchableOpacity onPress={() => router.push('/(tabs)/Profile')}>
             {profile?.profile_picture_url ? (
-              <Image 
-                source={{ uri: profile.profile_picture_url }} 
-                style={styles.profileImage} 
+              <Image
+                source={{ uri: profile.profile_picture_url }}
+                style={styles.profileImage}
               />
             ) : (
               <View style={styles.logoWrapper}>

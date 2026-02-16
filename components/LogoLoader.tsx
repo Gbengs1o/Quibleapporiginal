@@ -1,0 +1,99 @@
+import React, { useEffect } from 'react';
+import { StyleSheet, View } from 'react-native';
+import Animated, {
+    Easing,
+    useAnimatedStyle,
+    useSharedValue,
+    withDelay,
+    withRepeat,
+    withTiming,
+} from 'react-native-reanimated';
+import Svg, { G, Path } from 'react-native-svg';
+
+const AnimatedG = Animated.createAnimatedComponent(G);
+
+interface Props {
+    size?: number;
+    color?: string;
+}
+
+export default function LogoLoader({ size = 80, color = '#F4821F' }: Props) {
+    // Animation values for each path
+    const scale1 = useSharedValue(1);
+    const opacity1 = useSharedValue(1);
+    const scale2 = useSharedValue(1);
+    const opacity2 = useSharedValue(1);
+
+    useEffect(() => {
+        // Path 1 animation
+        scale1.value = withRepeat(
+            withTiming(0.85, { duration: 1000, easing: Easing.inOut(Easing.ease) }),
+            -1,
+            true
+        );
+        opacity1.value = withRepeat(
+            withTiming(0.6, { duration: 1000, easing: Easing.inOut(Easing.ease) }),
+            -1,
+            true
+        );
+
+        // Path 2 animation (delayed by 300ms)
+        scale2.value = withDelay(300, withRepeat(
+            withTiming(0.85, { duration: 1000, easing: Easing.inOut(Easing.ease) }),
+            -1,
+            true
+        ));
+        opacity2.value = withDelay(300, withRepeat(
+            withTiming(0.6, { duration: 1000, easing: Easing.inOut(Easing.ease) }),
+            -1,
+            true
+        ));
+    }, []);
+
+    const animatedStyle1 = useAnimatedStyle(() => ({
+        transform: [{ scale: scale1.value }],
+        opacity: opacity1.value,
+    }));
+
+    const animatedStyle2 = useAnimatedStyle(() => ({
+        transform: [{ scale: scale2.value }],
+        opacity: opacity2.value,
+    }));
+
+    // Calculate aspect ratio
+    const aspectRatio = 783 / 732;
+    const height = size * aspectRatio;
+
+    return (
+        <View style={styles.container}>
+            <Svg width={size} height={height} viewBox="0 0 732 783">
+                {/* Path 1 - Right swirl */}
+                <Animated.View style={[{ position: 'absolute' }, animatedStyle1]}>
+                    <Svg width={size} height={height} viewBox="0 0 732 783">
+                        <Path
+                            d="M606.233,776.334c-45.312,-45.191 -114.478,-206.483 -199.382,-295.614c-2.42,-2.541 -3.549,-6.361 32.356,-29.614c26.7,-17.291 38.2,-19.712 45.665,-20.609c25.35,-3.045 38.456,47.011 69.646,85.529c17.855,22.05 29.601,14.824 47.967,-20.536c64.506,-124.191 16.705,-277.65 -77.26,-348.212c-98.151,-73.707 -189.726,-64.69 -279.531,-26.968c-33.566,14.099 -34.696,21.222 -38.485,15.176c-39.443,-62.94 -42.032,-61.225 -44.987,-66.962c-2.358,-4.577 52.185,-33.264 69.84,-40.454c270.536,-110.181 543.103,121.76 493.209,386.673c-14.019,74.432 -45.178,121.99 -55.08,139.129c-22.681,39.253 -42.524,49.806 -39.971,68.772c4.012,29.807 93.856,97.509 46.85,127.34c-26.307,16.695 -50.589,46.106 -70.838,26.35Z"
+                            fill={color}
+                        />
+                    </Svg>
+                </Animated.View>
+
+                {/* Path 2 - Left swirl */}
+                <Animated.View style={[{ position: 'absolute' }, animatedStyle2]}>
+                    <Svg width={size} height={height} viewBox="0 0 732 783">
+                        <Path
+                            d="M328.237,528.047c4.062,-3.563 27.307,-23.951 55.814,-38.023c9.522,-4.7 77.008,100.928 81.086,107.52c38.586,62.373 68.966,92.062 51.421,103.732c-3.398,2.26 -99.085,24.937 -117.665,27.506c-153.898,21.28 -276.468,-70.966 -329.939,-149.14c-137.917,-201.635 -27.956,-373.107 -18.39,-391.128c24.01,-45.232 82.056,-102.296 90.58,-108.394c2.513,-1.798 19.789,27.52 46.366,63.9c9.481,12.978 -24.126,26.871 -58.003,92.476c-62.702,121.422 -19.944,274.749 96.046,350.61c41.829,27.357 43.682,23.623 62.476,33.25c15.866,8.127 79.615,23.354 74.184,2.237c-7.279,-28.303 -69.13,-59.351 -33.977,-94.547Z"
+                            fill={color}
+                        />
+                    </Svg>
+                </Animated.View>
+            </Svg>
+        </View>
+    );
+}
+
+const styles = StyleSheet.create({
+    container: {
+        justifyContent: 'center',
+        alignItems: 'center',
+    },
+});

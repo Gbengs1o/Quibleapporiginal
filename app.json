@@ -6,11 +6,63 @@
     },
     "name": "quible",
     "slug": "quible",
+    "splash": {
+      "image": "./assets/images/splash.jpg",
+      "resizeMode": "contain",
+      "backgroundColor": "#FFFFFF"
+    },
+    "icon": "./assets/images/icon_v2.jpg",
     "android": {
-      "package": "com.anonymous.quible"
+      "package": "com.anonymous.quible",
+      "permissions": [
+        "CAMERA",
+        "RECORD_AUDIO",
+        "MODIFY_AUDIO_SETTINGS",
+        "INTERNET"
+      ],
+      "splash": {
+        "image": "./assets/images/splash.jpg",
+        "resizeMode": "contain",
+        "backgroundColor": "#FFFFFF"
+      },
+      "config": {
+        "googleMaps": {
+          "apiKey": "AIzaSyB7Cbxbo4Rcj7fSwQHOdYWBLX9JpT85Qao"
+        }
+      }
     },
     "ios": {
-      "bundleIdentifier": "com.anonymous.quible"
-    }
+      "bundleIdentifier": "com.anonymous.quible",
+      "infoPlist": {
+        "NSCameraUsageDescription": "This app uses the camera for video calls.",
+        "NSMicrophoneUsageDescription": "This app uses the microphone for voice calls."
+      },
+      "config": {
+        "googleMapsApiKey": "AIzaSyB7Cbxbo4Rcj7fSwQHOdYWBLX9JpT85Qao"
+      }
+    },
+    "plugins": [
+      [
+        "expo-camera",
+        {
+          "cameraPermission": "Allow Quible to access your camera",
+          "microphonePermission": "Allow Quible to access your microphone"
+        }
+      ],
+      [
+        "expo-build-properties",
+        {
+          "android": {
+            "minSdkVersion": 24
+          }
+        }
+      ]
+    ],
+    "extra": {
+      "eas": {
+        "projectId": "ca6f7d8e-b870-4a97-8059-c8a2181dff7f"
+      }
+    },
+    "owner": "dovekings"
   }
 }
