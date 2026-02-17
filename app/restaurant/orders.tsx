@@ -3,7 +3,6 @@ import { ThemedView } from '@/components/themed-view';
 import { useCall } from '@/contexts/call-context';
 import { OrderStatus, useOrders } from '@/contexts/order';
 import { useRestaurantMenu } from '@/contexts/restaurant-menu';
-import { useTheme } from '@/hooks/use-theme';
 import { useThemeColor } from '@/hooks/use-theme-color';
 import { supabase } from '@/utils/supabase';
 import { Ionicons } from '@expo/vector-icons';
@@ -12,25 +11,25 @@ import { useRouter } from 'expo-router';
 import LottieView from 'lottie-react-native';
 import React from 'react';
 import {
+    ActivityIndicator,
     Alert,
     FlatList,
+    Image,
+    Linking,
     Modal,
     RefreshControl,
     StyleSheet,
     TextInput,
     TouchableOpacity,
-    View
+    View,
 } from 'react-native';
-
-
-
 
 const STATUS_ACTIONS: Record<OrderStatus, { label: string, next: OrderStatus, color: string, icon: string, isSpecial?: boolean, isVerify?: boolean } | null> = {
     'received': { label: 'Accept & Prepare', next: 'preparing', color: '#f59e0b', icon: 'flame' },
     'preparing': { label: 'Mark Ready', next: 'ready', color: '#22c55e', icon: 'checkmark-circle' },
     'ready': { label: 'Assign Rider', next: 'with_rider', color: '#3b82f6', icon: 'bicycle', isSpecial: true },
-    'with_rider': { label: 'Verify Pickup', next: 'out_for_delivery', color: '#8b5cf6', icon: 'shield-checkmark', isSpecial: true, isVerify: true }, // Verified Secure Handoff
-    'out_for_delivery': null, // Rider completes this
+    'with_rider': { label: 'Verify Pickup', next: 'out_for_delivery', color: '#8b5cf6', icon: 'shield-checkmark', isSpecial: true, isVerify: true },
+    'out_for_delivery': null,
     'delivered': null,
     'cancelled': null
 };
@@ -40,10 +39,9 @@ export default function OrdersScreen() {
     const router = useRouter();
     const { startCall } = useCall();
     const { restaurantOrders, refreshOrders, updateOrderStatus, cancelOrder, loading } = useOrders();
-    const { theme } = useTheme();
+    const theme = useThemeColor({ light: 'light', dark: 'dark' }, 'text') === 'dark' ? 'dark' : 'light';
     const isDark = theme === 'dark';
-
-    // Theme-aware colors
+    // ... theme hooks ...
     const iconColor = useThemeColor({ light: '#1f2050', dark: '#fff' }, 'text');
     const cardBg = useThemeColor({ light: '#ffffff', dark: '#1E1E1E' }, 'background');
     const borderColor = useThemeColor({ light: '#e5e7eb', dark: '#333' }, 'text');
@@ -56,60 +54,72 @@ export default function OrdersScreen() {
     const [verifyOrderId, setVerifyOrderId] = React.useState<string | null>(null);
     const [verifying, setVerifying] = React.useState(false);
 
+    // Profile Modal State
+    const [showProfileModal, setShowProfileModal] = React.useState(false);
+    const [selectedRider, setSelectedRider] = React.useState<any>(null);
+
+    const getStatusColor = (status: OrderStatus) => {
+        if (!STATUS_ACTIONS[status]) return subtleText;
+        return STATUS_ACTIONS[status]?.color || subtleText;
+    };
+
+    const getStatusIcon = (status: OrderStatus) => {
+        if (!STATUS_ACTIONS[status]) return 'ellipse';
+        return STATUS_ACTIONS[status]?.icon || 'ellipse';
+    };
+
+    // Chat Loading
+    const [chatLoading, setChatLoading] = React.useState<string | null>(null);
+
     const handleAction = async (orderId: string, nextStatus: OrderStatus) => {
         await updateOrderStatus(orderId, nextStatus);
     };
 
-    const handleCancel = (orderId: string) => {
+    const handleCancel = async (orderId: string) => {
         Alert.alert(
-            "Cancel Order?",
-            "This will refund the customer fully. This action cannot be undone.",
+            'Reject Order',
+            'Are you sure you want to reject this order?',
             [
-                { text: "No, Keep Order", style: 'cancel' },
+                { text: 'No', style: 'cancel' },
                 {
-                    text: "Yes, Cancel & Refund",
+                    text: 'Yes, Reject',
                     style: 'destructive',
                     onPress: async () => {
-                        try {
-                            await cancelOrder(orderId);
-                        } catch (e: any) {
-                            Alert.alert('Error', e.message);
-                        }
+                        await updateOrderStatus(orderId, 'cancelled');
                     }
                 }
             ]
         );
     };
 
-    const getStatusColor = (status: string) => {
-        switch (status) {
-            case 'received': return '#ef4444';
-            case 'preparing': return '#f59e0b';
-            case 'ready': return '#22c55e';
-            case 'with_rider': return '#3b82f6';
-            case 'delivered': return '#10b981';
-            default: return '#888';
-        }
-    };
+    const openChat = async (orderId: string) => {
+        setChatLoading(orderId);
+        try {
+            const { data: chatId, error } = await supabase.rpc('get_or_create_rider_order_chat', {
+                p_order_id: orderId,
+                p_chat_type: 'rider_restaurant'
+            });
 
-    const getStatusIcon = (status: string) => {
-        switch (status) {
-            case 'received': return 'alert-circle';
-            case 'preparing': return 'flame';
-            case 'ready': return 'checkmark-circle';
-            case 'with_rider': return 'bicycle';
-            case 'delivered': return 'checkmark-done-circle';
-            default: return 'help-circle';
+            if (error) throw error;
+
+            if (chatId) {
+                router.push(`/order-chat/${chatId}?target=rider`);
+            }
+        } catch (error: any) {
+            Alert.alert('Error', error.message || 'Could not access chat');
+        } finally {
+            setChatLoading(null);
         }
     };
 
     const renderOrderItem = ({ item: order }: { item: any }) => {
         const action = STATUS_ACTIONS[order.status as OrderStatus];
         const statusColor = getStatusColor(order.status);
+        const hasRider = (order.status === 'with_rider' || order.status === 'out_for_delivery') && order.rider;
 
         return (
             <View style={[styles.card, { backgroundColor: cardBg, borderColor }]}>
-                {/* Status Ribbon */}
+                {/* Status Ribbon and Header */}
                 <View style={[styles.statusRibbon, { backgroundColor: statusColor }]}>
                     <Ionicons name={getStatusIcon(order.status) as any} size={14} color="#fff" />
                     <ThemedText style={styles.statusRibbonText}>
@@ -161,6 +171,35 @@ export default function OrdersScreen() {
                         <ThemedText style={styles.totalValue}>₦{order.total_amount.toLocaleString()}</ThemedText>
                     </View>
 
+                    {/* Rider Info Row (New) */}
+                    {hasRider && (
+                        <View style={styles.riderInfoRow}>
+                            <View style={styles.riderInfoLeft}>
+                                {order.rider?.profile?.profile_picture_url ? (
+                                    <Image source={{ uri: order.rider.profile.profile_picture_url }} style={styles.riderAvatarSmall} />
+                                ) : (
+                                    <View style={[styles.riderAvatarSmall, { backgroundColor: '#e5e7eb', justifyContent: 'center', alignItems: 'center' }]}>
+                                        <Ionicons name="person" size={16} color="#9ca3af" />
+                                    </View>
+                                )}
+                                <View>
+                                    <ThemedText style={styles.riderNameSmall}>
+                                        {order.rider?.profile?.first_name} {order.rider?.profile?.last_name?.charAt(0)}.
+                                    </ThemedText>
+                                    <ThemedText style={[styles.riderVehicleSmall, { color: subtleText }]}>
+                                        {order.rider?.vehicle_type || 'Rider'} • {order.rider?.vehicle_plate || ''}
+                                    </ThemedText>
+                                </View>
+                            </View>
+                            <TouchableOpacity onPress={() => {
+                                setSelectedRider(order.rider);
+                                setShowProfileModal(true);
+                            }}>
+                                <ThemedText style={{ color: '#f27c22', fontWeight: '600', fontSize: 13 }}>View Profile</ThemedText>
+                            </TouchableOpacity>
+                        </View>
+                    )}
+
                     {/* Action Buttons - Full Width */}
                     <View style={styles.actionButtonsRow}>
                         {(order.status === 'received' || order.status === 'preparing') && (
@@ -182,6 +221,22 @@ export default function OrdersScreen() {
                                 activeOpacity={0.8}
                             >
                                 <Ionicons name="call" size={20} color="#fff" />
+                            </TouchableOpacity>
+                        )}
+
+                        {/* Chat Button (Only when rider is assigned) */}
+                        {((order.status === 'with_rider' || order.status === 'out_for_delivery') && order.rider_id) && (
+                            <TouchableOpacity
+                                style={[styles.chatButton, { opacity: chatLoading === order.id ? 0.7 : 1 }]}
+                                onPress={() => openChat(order.id)}
+                                disabled={chatLoading === order.id}
+                                activeOpacity={0.8}
+                            >
+                                {chatLoading === order.id ? (
+                                    <ActivityIndicator size="small" color="#fff" />
+                                ) : (
+                                    <Ionicons name="chatbubble" size={20} color="#fff" />
+                                )}
                             </TouchableOpacity>
                         )}
 
@@ -221,21 +276,19 @@ export default function OrdersScreen() {
             </View>
         );
     };
-
     return (
         <ThemedView style={styles.container}>
-            {/* Header */}
             <LinearGradient
-                colors={isDark ? ['#1f2050', '#1a1a2e'] : ['#1f2050', '#2d2d6e']}
+                colors={['#1e2050', '#2a2d7c']}
                 style={styles.headerGradient}
             >
-                <TouchableOpacity style={styles.menuButton} onPress={openMenu}>
+                <TouchableOpacity onPress={openMenu} style={styles.menuButton}>
                     <Ionicons name="menu" size={28} color="#fff" />
                 </TouchableOpacity>
                 <View style={styles.headerContent}>
-                    <ThemedText style={styles.headerTitle}>Incoming Orders</ThemedText>
+                    <ThemedText style={styles.headerTitle}>Orders</ThemedText>
                     <ThemedText style={styles.headerSubtitle}>
-                        {restaurantOrders.length > 0 ? `${restaurantOrders.length} active` : 'No active orders'}
+                        {restaurantOrders.length} active order{restaurantOrders.length !== 1 ? 's' : ''}
                     </ThemedText>
                 </View>
                 <View style={styles.headerBadge}>
@@ -243,7 +296,6 @@ export default function OrdersScreen() {
                 </View>
             </LinearGradient>
 
-            {/* Orders List */}
             <FlatList
                 data={restaurantOrders}
                 renderItem={renderOrderItem}
@@ -341,21 +393,84 @@ export default function OrdersScreen() {
                     </View>
                 </View>
             </Modal>
+
+            {/* Rider Profile Modal */}
+            <Modal
+                visible={showProfileModal}
+                transparent
+                animationType="slide"
+                onRequestClose={() => setShowProfileModal(false)}
+            >
+                <View style={[styles.modalOverlay, { justifyContent: 'flex-end', padding: 0 }]}>
+                    <View style={[styles.profileSheet, { backgroundColor: cardBg }]}>
+                        <View style={styles.sheetHandle} />
+
+                        {selectedRider && (
+                            <View style={styles.profileContent}>
+                                <View style={styles.profileHeader}>
+                                    {selectedRider.profile?.profile_picture_url ? (
+                                        <Image source={{ uri: selectedRider.profile.profile_picture_url }} style={styles.profileAvatarLarge} />
+                                    ) : (
+                                        <View style={[styles.profileAvatarLarge, { backgroundColor: '#f3f4f6', justifyContent: 'center', alignItems: 'center' }]}>
+                                            <Ionicons name="person" size={40} color="#9ca3af" />
+                                        </View>
+                                    )}
+                                    <View style={{ alignItems: 'center', marginTop: 12 }}>
+                                        <ThemedText style={styles.profileNameLarge}>
+                                            {selectedRider.profile?.first_name} {selectedRider.profile?.last_name}
+                                        </ThemedText>
+                                        <ThemedText style={[styles.profileSubtitle, { color: subtleText }]}>
+                                            {selectedRider.vehicle_type || 'Delivery Rider'} • {selectedRider.vehicle_plate || 'No Plate'}
+                                        </ThemedText>
+                                        <View style={styles.ratingBadge}>
+                                            <Ionicons name="star" size={14} color="#f59e0b" />
+                                            <ThemedText style={styles.ratingText}>4.8 (120+ deliveries)</ThemedText>
+                                        </View>
+                                    </View>
+                                </View>
+
+                                {/* Contact Actions */}
+                                <View style={styles.profileActions}>
+                                    <TouchableOpacity
+                                        style={[styles.profileActionButton, { backgroundColor: '#22c55e' }]}
+                                        onPress={() => {
+                                            if (selectedRider.profile?.phone_number) {
+                                                Linking.openURL(`tel:${selectedRider.profile.phone_number}`);
+                                            }
+                                        }}
+                                    >
+                                        <Ionicons name="call" size={20} color="#fff" />
+                                        <ThemedText style={styles.profileActionText}>Call Rider</ThemedText>
+                                    </TouchableOpacity>
+
+                                    <TouchableOpacity
+                                        style={[styles.profileActionButton, { backgroundColor: '#f3f4f6' }]}
+                                        onPress={() => setShowProfileModal(false)}
+                                    >
+                                        <ThemedText style={[styles.profileActionText, { color: '#374151' }]}>Close</ThemedText>
+                                    </TouchableOpacity>
+                                </View>
+                            </View>
+                        )}
+                    </View>
+                </View>
+            </Modal>
         </ThemedView>
     );
 }
 
-// ... helper ...
-function shadeColor(color: string, percent: number): string {
-    const num = parseInt(color.replace('#', ''), 16);
-    const amt = Math.round(2.55 * percent);
-    const R = (num >> 16) + amt;
-    const G = (num >> 8 & 0x00FF) + amt;
-    const B = (num & 0x0000FF) + amt;
-    return '#' + (0x1000000 + (R < 255 ? R < 1 ? 0 : R : 255) * 0x10000 + (G < 255 ? G < 1 ? 0 : G : 255) * 0x100 + (B < 255 ? B < 1 ? 0 : B : 255)).toString(16).slice(1);
-}
+// Helper functions
+const shadeColor = (color: string, percent: number) => {
+    var num = parseInt(color.replace("#", ""), 16),
+        amt = Math.round(2.55 * percent),
+        R = (num >> 16) + amt,
+        G = (num >> 8 & 0x00FF) + amt,
+        B = (num & 0x0000FF) + amt;
+    return "#" + (0x1000000 + (R < 255 ? R < 1 ? 0 : R : 255) * 0x10000 + (G < 255 ? G < 1 ? 0 : G : 255) * 0x100 + (B < 255 ? B < 1 ? 0 : B : 255)).toString(16).slice(1);
+};
 
 const styles = StyleSheet.create({
+    // ... existing styles ...
     container: {
         flex: 1,
     },
@@ -368,6 +483,120 @@ const styles = StyleSheet.create({
         borderBottomLeftRadius: 24,
         borderBottomRightRadius: 24,
     },
+    // ...
+    chatButton: {
+        width: 50,
+        justifyContent: 'center',
+        alignItems: 'center',
+        backgroundColor: '#f27c22',
+        borderRadius: 14,
+        shadowColor: '#f27c22',
+        shadowOffset: { width: 0, height: 4 },
+        shadowOpacity: 0.3,
+        shadowRadius: 8,
+        elevation: 4,
+    },
+    riderInfoRow: {
+        flexDirection: 'row',
+        justifyContent: 'space-between',
+        alignItems: 'center',
+        paddingVertical: 12,
+        borderBottomWidth: 1,
+        borderBottomColor: 'rgba(0,0,0,0.06)',
+    },
+    riderInfoLeft: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 10,
+    },
+    riderAvatarSmall: {
+        width: 36,
+        height: 36,
+        borderRadius: 18,
+    },
+    riderNameSmall: {
+        fontSize: 14,
+        fontWeight: '600',
+    },
+    riderVehicleSmall: {
+        fontSize: 12,
+    },
+    // Profile Sheet Styles
+    profileSheet: {
+        width: '100%',
+        padding: 24,
+        borderTopLeftRadius: 30,
+        borderTopRightRadius: 30,
+        paddingBottom: 40,
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: -2 },
+        shadowOpacity: 0.1,
+        shadowRadius: 10,
+        elevation: 10,
+    },
+    sheetHandle: {
+        width: 40,
+        height: 4,
+        backgroundColor: '#e5e7eb',
+        borderRadius: 2,
+        alignSelf: 'center',
+        marginBottom: 20,
+    },
+    profileContent: {
+        alignItems: 'center',
+    },
+    profileHeader: {
+        alignItems: 'center',
+        marginBottom: 24,
+    },
+    profileAvatarLarge: {
+        width: 80,
+        height: 80,
+        borderRadius: 40,
+    },
+    profileNameLarge: {
+        fontSize: 18,
+        fontWeight: 'bold',
+        marginBottom: 4,
+    },
+    profileSubtitle: {
+        fontSize: 14,
+    },
+    ratingBadge: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 4,
+        marginTop: 8,
+        backgroundColor: 'rgba(245, 158, 11, 0.1)',
+        paddingHorizontal: 8,
+        paddingVertical: 4,
+        borderRadius: 8,
+    },
+    ratingText: {
+        fontSize: 12,
+        color: '#d97706',
+        fontWeight: '600',
+    },
+    profileActions: {
+        flexDirection: 'row',
+        gap: 12,
+        width: '100%',
+    },
+    profileActionButton: {
+        flex: 1,
+        height: 50,
+        borderRadius: 14,
+        justifyContent: 'center',
+        alignItems: 'center',
+        flexDirection: 'row',
+        gap: 8,
+    },
+    profileActionText: {
+        fontSize: 16,
+        fontWeight: '600',
+        color: '#fff',
+    },
+    // ... other existing styles ...
     menuButton: {
         width: 44,
         height: 44,

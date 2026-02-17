@@ -1,3 +1,4 @@
+import { useRiderNotifications } from '@/contexts/rider-notifications';
 import { useThemeColor } from '@/hooks/use-theme-color';
 import { supabase } from '@/utils/supabase';
 import { Ionicons } from '@expo/vector-icons';
@@ -26,6 +27,7 @@ const NotificationItem: React.FC<NotificationItemProps> = ({
     metaData,
 }) => {
     const router = useRouter();
+    const { refreshNotifications } = useRiderNotifications();
     const cardBg = useThemeColor({ light: '#fff', dark: '#1E1E1E' }, 'background');
     const textColor = useThemeColor({ light: '#000', dark: '#fff' }, 'text');
     const subTextColor = useThemeColor({ light: '#666', dark: '#999' }, 'text');
@@ -84,7 +86,9 @@ const NotificationItem: React.FC<NotificationItemProps> = ({
     const handlePress = async () => {
         // Mark as read
         if (!isRead) {
-            supabase.from('notifications').update({ is_read: true }).eq('id', id).then();
+            supabase.from('notifications').update({ is_read: true }).eq('id', id).then(() => {
+                refreshNotifications();
+            });
         }
 
         // Chat notifications: go directly to the chat screen

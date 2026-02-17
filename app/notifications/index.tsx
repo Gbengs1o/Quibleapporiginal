@@ -3,6 +3,7 @@ import NotificationItem from '@/components/NotificationItem';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { useAuth } from '@/contexts/auth';
+import { useRiderNotifications } from '@/contexts/rider-notifications';
 import { useThemeColor } from '@/hooks/use-theme-color';
 import { supabase } from '@/utils/supabase';
 import { Stack } from 'expo-router';
@@ -17,6 +18,7 @@ export default function NotificationsScreen() {
     const [loading, setLoading] = useState(true);
     const [refreshing, setRefreshing] = useState(false);
     const [activeFilter, setActiveFilter] = useState('All');
+    const { refreshNotifications } = useRiderNotifications();
 
     const activeTabBg = useThemeColor({ light: '#000', dark: '#fff' }, 'text');
     const activeTabText = useThemeColor({ light: '#fff', dark: '#000' }, 'background');
@@ -68,10 +70,29 @@ export default function NotificationsScreen() {
             })
             .subscribe();
 
+        // Mark all as read on mount
+        markAllAsRead();
+
         return () => {
             supabase.removeChannel(channel);
         };
     }, [user, isReady]);
+
+    const markAllAsRead = async () => {
+        if (!user) return;
+        try {
+            await supabase
+                .from('notifications')
+                .update({ is_read: true })
+                .eq('user_id', user.id)
+                .eq('is_read', false);
+
+            // Sync with global badge count
+            refreshNotifications();
+        } catch (error) {
+            console.error('Error marking notifications as read:', error);
+        }
+    };
 
     const onRefresh = () => {
         setRefreshing(true);

@@ -80,7 +80,7 @@ export default function RiderMessagesScreen() {
                 .select(`
                     *,
                     user:profiles!user_id(
-                        first_name, last_name, profile_picture_url, is_verified
+                        first_name, last_name, profile_picture_url
                     ),
                     request:delivery_requests(
                         status, item_description

@@ -57,9 +57,18 @@ function InitialLayout() {
     // Listen for user tapping a notification
     const subscription = Notifications.addNotificationResponseReceivedListener(response => {
       const data = response.notification.request.content.data;
-      // Navigate to notifications page if no specific link, or detailed page if ID exists
-      // Assuming payload has { id: '...' } or just go to index
-      router.push('/notifications');
+
+      // Handle deep linking for specific screens
+      if (data?.chatId) {
+        // Check if it's an order chat or regular chat
+        if (data.type === 'rider_customer' || data.type === 'rider_restaurant' || data.type === 'general') {
+          router.push(`/order-chat/${data.chatId}`);
+        } else {
+          router.push(`/chat/${data.chatId}`);
+        }
+      } else {
+        router.push('/notifications');
+      }
     });
 
     return () => subscription.remove();

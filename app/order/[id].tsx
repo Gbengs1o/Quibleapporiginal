@@ -91,6 +91,32 @@ export default function OrderDetailScreen() {
         }
     }, [orderId]);
 
+    // Real-time subscription for order status changes
+    useEffect(() => {
+        if (!orderId) return;
+
+        const channel = supabase
+            .channel(`order_status_${orderId}`)
+            .on(
+                'postgres_changes',
+                {
+                    event: 'UPDATE',
+                    schema: 'public',
+                    table: 'orders',
+                    filter: `id=eq.${orderId}`
+                },
+                (payload) => {
+                    const updated = payload.new;
+                    setOrder((prev: any) => prev ? { ...prev, ...updated } : prev);
+                }
+            )
+            .subscribe();
+
+        return () => {
+            supabase.removeChannel(channel);
+        };
+    }, [orderId]);
+
     // Track User Location
     useEffect(() => {
         (async () => {
@@ -260,6 +286,38 @@ export default function OrderDetailScreen() {
             Linking.openURL(`tel:${phone}`);
         } else {
             Alert.alert('No Phone', 'Restaurant phone number not available');
+        }
+    };
+
+    const handleRiderChat = async () => {
+        try {
+            const { data: chatId, error } = await supabase.rpc('get_or_create_customer_order_chat', {
+                p_order_id: orderId,
+                p_chat_type: 'rider_customer'
+            });
+
+            if (error) throw error;
+            router.push(`/order-chat/${chatId}`);
+        } catch (error: any) {
+            console.error('Rider Chat error:', error);
+            Alert.alert('Error', error.message || 'Failed to open chat with rider');
+        }
+    };
+
+    const handleRiderCall = async () => {
+        // We need to fetch rider phone if not available in order object
+        if (order?.rider_id) {
+            const { data: riderProfile } = await supabase
+                .from('profiles')
+                .select('phone_number')
+                .eq('id', order.rider_id)
+                .single();
+
+            if (riderProfile?.phone_number) {
+                Linking.openURL(`tel:${riderProfile.phone_number}`);
+            } else {
+                Alert.alert('No Phone', 'Rider phone number not available');
+            }
         }
     };
 
@@ -638,13 +696,33 @@ export default function OrderDetailScreen() {
                     <View style={styles.actionRow}>
                         <TouchableOpacity style={[styles.actionBtn, { backgroundColor: colors.accentLight }]} onPress={handleChat}>
                             <Ionicons name="chatbubbles" size={22} color={colors.accent} />
-                            <ThemedText style={[styles.actionBtnText, { color: colors.accent }]}>Chat</ThemedText>
+                            <ThemedText style={[styles.actionBtnText, { color: colors.accent }]}>Chat Restaurant</ThemedText>
                         </TouchableOpacity>
                         <TouchableOpacity style={[styles.actionBtn, { backgroundColor: '#22C55E20' }]} onPress={handleCall}>
                             <Ionicons name="call" size={22} color="#22C55E" />
-                            <ThemedText style={[styles.actionBtnText, { color: '#22C55E' }]}>Call</ThemedText>
+                            <ThemedText style={[styles.actionBtnText, { color: '#22C55E' }]}>Call Restaurant</ThemedText>
                         </TouchableOpacity>
                     </View>
+
+                    {/* Rider Contact Options */}
+                    {order.rider_id && (
+                        <>
+                            <View style={{ height: 1, backgroundColor: colors.cardBorder, marginVertical: 12 }} />
+                            <ThemedText style={[styles.cardTitle, { color: colors.text, marginBottom: 12, fontSize: 13, opacity: 0.8 }]}>
+                                Delivery Rider
+                            </ThemedText>
+                            <View style={styles.actionRow}>
+                                <TouchableOpacity style={[styles.actionBtn, { backgroundColor: colors.navy + '15' }]} onPress={handleRiderChat}>
+                                    <Ionicons name="chatbubble-ellipses" size={22} color={colors.navy} />
+                                    <ThemedText style={[styles.actionBtnText, { color: colors.navy }]}>Chat Rider</ThemedText>
+                                </TouchableOpacity>
+                                <TouchableOpacity style={[styles.actionBtn, { backgroundColor: '#22C55E20' }]} onPress={handleRiderCall}>
+                                    <Ionicons name="call" size={22} color="#22C55E" />
+                                    <ThemedText style={[styles.actionBtnText, { color: '#22C55E' }]}>Call Rider</ThemedText>
+                                </TouchableOpacity>
+                            </View>
+                        </>
+                    )}
                 </Animated.View>
 
                 {/* Rating Section (After Delivery) */}

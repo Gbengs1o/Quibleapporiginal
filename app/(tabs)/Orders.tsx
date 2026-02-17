@@ -143,7 +143,7 @@ export default function OrdersScreen() {
         style={[styles.card, { backgroundColor: colors.cardBg, borderColor: colors.cardBorder }]}
       >
         {/* Decorative accent bar */}
-        <View style={[styles.cardAccentBar, { backgroundColor: colors.accent }]} />
+        <View style={[styles.cardAccentBar, { backgroundColor: order.status === 'delivered' ? '#22C55E' : colors.accent }]} />
 
         {/* Card Header */}
         <View style={styles.cardHeader}>
@@ -199,31 +199,43 @@ export default function OrdersScreen() {
           )}
         </View>
 
-        {/* Progress Tracker */}
-        <View style={styles.trackerSection}>
-          <View style={styles.trackerHeader}>
-            <View style={styles.trackerLabelRow}>
-              <View style={[styles.liveIndicator, { backgroundColor: colors.accent }]} />
-              <ThemedText style={[styles.trackerLabel, { color: colors.textSecondary }]}>
-                Live Status
-              </ThemedText>
-            </View>
-            <View style={[styles.statusPill, { backgroundColor: colors.accentLight }]}>
-              <ThemedText style={[styles.statusPillText, { color: colors.accent }]}>
-                {order.status?.replace('_', ' ').toUpperCase() || 'PENDING'}
-              </ThemedText>
+        {/* Progress Tracker or Delivered State */}
+        {order.status === 'delivered' ? (
+          <View style={[styles.deliveredBanner, { backgroundColor: isDark ? 'rgba(34,197,94,0.1)' : 'rgba(34,197,94,0.06)' }]}>
+            <View style={styles.deliveredRow}>
+              <View style={[styles.deliveredIcon, { backgroundColor: '#22C55E' }]}>
+                <Ionicons name="checkmark" size={18} color="#fff" />
+              </View>
+              <View style={{ flex: 1 }}>
+                <ThemedText style={[styles.deliveredTitle, { color: '#22C55E' }]}>
+                  Delivered
+                </ThemedText>
+                <ThemedText style={[styles.deliveredSubtitle, { color: colors.textSecondary }]}>
+                  Your order has been completed
+                </ThemedText>
+              </View>
+              <View style={[styles.ratePrompt, { backgroundColor: '#22C55E' }]}>
+                <Ionicons name="star" size={14} color="#fff" />
+                <ThemedText style={styles.ratePromptText}>Rate</ThemedText>
+              </View>
             </View>
           </View>
-          {renderTracker(order.status)}
-        </View>
-
-        {/* Tap hint for delivered orders */}
-        {order.status === 'delivered' && (
-          <View style={[styles.tapHint, { backgroundColor: isDark ? 'rgba(34,197,94,0.1)' : 'rgba(34,197,94,0.08)' }]}>
-            <Ionicons name="star" size={14} color="#22C55E" />
-            <ThemedText style={[styles.tapHintText, { color: '#22C55E' }]}>
-              Tap to rate your experience
-            </ThemedText>
+        ) : (
+          <View style={styles.trackerSection}>
+            <View style={styles.trackerHeader}>
+              <View style={styles.trackerLabelRow}>
+                <View style={[styles.liveIndicator, { backgroundColor: colors.accent }]} />
+                <ThemedText style={[styles.trackerLabel, { color: colors.textSecondary }]}>
+                  Live Status
+                </ThemedText>
+              </View>
+              <View style={[styles.statusPill, { backgroundColor: colors.accentLight }]}>
+                <ThemedText style={[styles.statusPillText, { color: colors.accent }]}>
+                  {order.status?.replace('_', ' ').toUpperCase() || 'PENDING'}
+                </ThemedText>
+              </View>
+            </View>
+            {renderTracker(order.status)}
           </View>
         )}
       </TouchableOpacity>
@@ -431,18 +443,45 @@ export default function OrdersScreen() {
               </View>
             )}
 
-            {pastOrders.length > 0 && (
-              <View style={styles.section}>
-                <ThemedText style={[styles.sectionTitle, { color: colors.textSecondary }]}>
-                  Past Orders
-                </ThemedText>
-                {pastOrders.map((order, index) => (
-                  <View key={order.id} style={{ opacity: 0.7 }}>
-                    {renderOrder({ item: order, index })}
-                  </View>
-                ))}
-              </View>
-            )}
+            {/* Recently Delivered - prominent section for orders delivered in last 2 hours */}
+            {(() => {
+              const twoHoursAgo = new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString();
+              const recentlyDelivered = pastOrders.filter(
+                (o) => o.status === 'delivered' && o.updated_at && o.updated_at > twoHoursAgo
+              );
+              const olderPastOrders = pastOrders.filter(
+                (o) => !(o.status === 'delivered' && o.updated_at && o.updated_at > twoHoursAgo)
+              );
+              return (
+                <>
+                  {recentlyDelivered.length > 0 && (
+                    <View style={styles.section}>
+                      <View style={styles.deliveredSectionHeader}>
+                        <View style={[styles.deliveredSectionDot, { backgroundColor: '#22C55E' }]} />
+                        <ThemedText style={[styles.sectionTitle, { color: '#22C55E', marginBottom: 0 }]}>
+                          Just Delivered
+                        </ThemedText>
+                      </View>
+                      {recentlyDelivered.map((order, index) => (
+                        <View key={order.id}>{renderOrder({ item: order, index })}</View>
+                      ))}
+                    </View>
+                  )}
+                  {olderPastOrders.length > 0 && (
+                    <View style={styles.section}>
+                      <ThemedText style={[styles.sectionTitle, { color: colors.textSecondary }]}>
+                        Past Orders
+                      </ThemedText>
+                      {olderPastOrders.map((order, index) => (
+                        <View key={order.id} style={{ opacity: 0.7 }}>
+                          {renderOrder({ item: order, index })}
+                        </View>
+                      ))}
+                    </View>
+                  )}
+                </>
+              );
+            })()}
 
             {activeOrders.length === 0 && pastOrders.length === 0 && renderEmptyState('food')}
           </>
@@ -797,6 +836,58 @@ const styles = StyleSheet.create({
     lineHeight: 22,
   },
 
+  // Delivered Banner
+  deliveredBanner: {
+    marginTop: 16,
+    padding: 14,
+    borderRadius: 12,
+  },
+  deliveredRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+  },
+  deliveredIcon: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  deliveredTitle: {
+    fontSize: 16,
+    fontWeight: '800',
+  },
+  deliveredSubtitle: {
+    fontSize: 12,
+    marginTop: 2,
+  },
+  ratePrompt: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    borderRadius: 20,
+  },
+  ratePromptText: {
+    color: '#fff',
+    fontSize: 13,
+    fontWeight: '700',
+  },
+  // Delivered Section Header
+  deliveredSectionHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    paddingHorizontal: 20,
+    marginBottom: 16,
+  },
+  deliveredSectionDot: {
+    width: 10,
+    height: 10,
+    borderRadius: 5,
+  },
   // Tap Hint for delivered orders
   tapHint: {
     flexDirection: 'row',

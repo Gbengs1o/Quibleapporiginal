@@ -4,6 +4,7 @@ import { ThemedView } from '@/components/themed-view';
 import TypingIndicator from '@/components/TypingIndicator';
 import { useAuth } from '@/contexts/auth';
 import { useCall } from '@/contexts/call-context';
+import { useRiderNotifications } from '@/contexts/rider-notifications';
 import { useThemeColor } from '@/hooks/use-theme-color';
 import { uploadToCloudinary } from '@/utils/cloudinary';
 import { supabase } from '@/utils/supabase';
@@ -64,6 +65,8 @@ export default function OrderChatScreen() {
     const navy = '#1F2050';
     const otherUserBubble = useThemeColor({ light: '#E8E9ED', dark: '#2A2A35' }, 'background');
 
+    const { refreshNotifications } = useRiderNotifications();
+
     useEffect(() => {
         if (chatId) {
             fetchChatDetails();
@@ -88,6 +91,11 @@ export default function OrderChatScreen() {
                             return [...prev, payload.new];
                         });
                         setTimeout(() => flatListRef.current?.scrollToEnd({ animated: true }), 100);
+
+                        // Mark as read immediately if it's from the other person
+                        if (payload.new.sender_id !== user?.id) {
+                            markMessagesAsRead(chatId as string);
+                        }
                     }
                 )
                 .subscribe();
@@ -108,6 +116,7 @@ export default function OrderChatScreen() {
                 supabase.removeChannel(messageSub);
                 supabase.removeChannel(typingChannel);
                 if (typingTimeout.current) clearTimeout(typingTimeout.current);
+                refreshNotifications();
             };
         }
     }, [chatId]);
@@ -182,13 +191,16 @@ export default function OrderChatScreen() {
     };
 
     const markMessagesAsRead = async (currentChatId: string) => {
+        if (!user?.id) return;
         try {
             await supabase
                 .from('order_chat_messages')
                 .update({ is_read: true })
                 .eq('chat_id', currentChatId)
                 .eq('is_read', false)
-                .neq('sender_id', user?.id);
+                .neq('sender_id', user.id);
+
+            refreshNotifications();
         } catch (e) {
             console.log('Error marking messages as read', e);
         }

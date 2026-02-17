@@ -32,7 +32,7 @@ const RiderSidebar = () => {
     const { user, signOut } = useAuth();
     const { theme, toggleTheme } = useTheme();
     const { closeMenu } = useRiderMenu();
-    const { unreadMessages, pendingDeliveries, unreadAlerts } = useRiderNotifications();
+    const { unreadMessages, pendingDeliveries, pendingFoodInvites, unreadAlerts } = useRiderNotifications();
 
     const isDark = theme === 'dark';
 
@@ -75,7 +75,8 @@ const RiderSidebar = () => {
             icon: 'document-text-outline',
             activeIcon: 'document-text',
             route: '/rider/(dashboard)/deliveries',
-            badge: pendingDeliveries
+            route: '/rider/(dashboard)/deliveries',
+            badge: pendingDeliveries + pendingFoodInvites
         },
         {
             name: 'Messages',

@@ -27,11 +27,29 @@ BEGIN
     FROM public.restaurants
     WHERE id = v_chat.restaurant_id;
 
-    -- Determine recipient: if sender is customer, notify restaurant owner; otherwise notify customer
-    IF NEW.sender_id = v_chat.customer_id THEN
-        v_recipient_id := v_restaurant_owner_id;
-    ELSE
-        v_recipient_id := v_chat.customer_id;
+    -- Determine Recipient based on Chat Type
+    v_recipient_id := NULL;
+
+    IF v_chat.chat_type = 'rider_customer' THEN
+        IF NEW.sender_id = v_chat.customer_id THEN
+            v_recipient_id := v_order.rider_id; -- Customer -> Rider
+        ELSIF v_order.rider_id IS NOT NULL AND NEW.sender_id = v_order.rider_id THEN
+            v_recipient_id := v_chat.customer_id; -- Rider -> Customer
+        END IF;
+
+    ELSIF v_chat.chat_type = 'rider_restaurant' THEN
+        IF NEW.sender_id = v_restaurant_owner_id THEN
+             v_recipient_id := v_order.rider_id; -- Restaurant -> Rider
+        ELSIF v_order.rider_id IS NOT NULL AND NEW.sender_id = v_order.rider_id THEN
+             v_recipient_id := v_restaurant_owner_id; -- Rider -> Restaurant
+        END IF;
+
+    ELSE -- 'general' or NULL (Legacy Customer-Restaurant)
+        IF NEW.sender_id = v_chat.customer_id THEN
+            v_recipient_id := v_restaurant_owner_id;
+        ELSE
+            v_recipient_id := v_chat.customer_id;
+        END IF;
     END IF;
 
     -- Don't notify yourself

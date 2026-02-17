@@ -37,12 +37,13 @@ const RestaurantSidebar = (props: any) => {
     const [imageError, setImageError] = useState(false);
     const [pendingOrderCount, setPendingOrderCount] = useState(0);
     const [unreadMessageCount, setUnreadMessageCount] = useState(0);
+    const [unreadReviewCount, setUnreadReviewCount] = useState(0);
 
     // Animation for badge pulse
     const badgeScale = useSharedValue(1);
 
     useEffect(() => {
-        if (pendingOrderCount > 0 || unreadMessageCount > 0) {
+        if (pendingOrderCount > 0 || unreadMessageCount > 0 || unreadReviewCount > 0) {
             badgeScale.value = withRepeat(
                 withSequence(
                     withTiming(1.2, { duration: 300 }),
@@ -52,7 +53,7 @@ const RestaurantSidebar = (props: any) => {
                 false
             );
         }
-    }, [pendingOrderCount, unreadMessageCount]);
+    }, [pendingOrderCount, unreadMessageCount, unreadReviewCount]);
 
     const badgeAnimatedStyle = useAnimatedStyle(() => ({
         transform: [{ scale: badgeScale.value }],
@@ -70,6 +71,7 @@ const RestaurantSidebar = (props: any) => {
         // Fetch initial pending order count
         fetchPendingOrders();
         fetchUnreadMessages();
+        fetchUnreadReviews();
 
         // Subscribe to new orders
         const subscription = supabase
@@ -111,9 +113,23 @@ const RestaurantSidebar = (props: any) => {
             })
             .subscribe();
 
+        // Subscribe to new reviews
+        const reviewSub = supabase
+            .channel('restaurant-reviews-sidebar')
+            .on('postgres_changes', {
+                event: '*',
+                schema: 'public',
+                table: 'food_order_reviews',
+                filter: `restaurant_id=eq.${restaurant.id}`
+            }, () => {
+                fetchUnreadReviews();
+            })
+            .subscribe();
+
         return () => {
             supabase.removeChannel(subscription);
             supabase.removeChannel(chatSub);
+            supabase.removeChannel(reviewSub);
         };
     }, [restaurant?.id]);
 
@@ -158,6 +174,20 @@ const RestaurantSidebar = (props: any) => {
         }
     };
 
+    const fetchUnreadReviews = async () => {
+        if (!restaurant?.id) return;
+
+        const { count, error } = await supabase
+            .from('food_order_reviews')
+            .select('*', { count: 'exact', head: true })
+            .eq('restaurant_id', restaurant.id)
+            .eq('is_viewed', false);
+
+        if (!error && count !== null) {
+            setUnreadReviewCount(count);
+        }
+    };
+
     const fetchRestaurantProfile = async () => {
         try {
             setLoading(true);
@@ -187,7 +217,7 @@ const RestaurantSidebar = (props: any) => {
         { name: 'Orders', icon: 'clipboard-list', type: 'FontAwesome5', route: '/restaurant/orders', hasBadge: true },
         { name: 'Menu Management', icon: 'restaurant-menu', type: 'MaterialIcons', route: '/restaurant/menu' },
         { name: 'Promotions', icon: 'pricetag', type: 'Ionicons', route: '/restaurant/promotions' },
-        { name: 'Reviews', icon: 'star', type: 'Ionicons', route: '/restaurant/reviews' },
+        { name: 'Reviews', icon: 'star', type: 'Ionicons', route: '/restaurant/reviews', hasReviewBadge: true },
         { name: 'Messages', icon: 'chatbubble-ellipses', type: 'Ionicons', route: '/restaurant/messages', hasMessageBadge: true },
         { name: 'Profile & Settings', icon: 'person', type: 'Ionicons', route: '/restaurant/settings' },
         { name: 'Support & Help', icon: 'help-circle', type: 'Ionicons', route: '/restaurant/support' },
@@ -278,6 +308,15 @@ const RestaurantSidebar = (props: any) => {
                                         <Animated.View style={[styles.orderBadge, { backgroundColor: '#F27C22' }, badgeAnimatedStyle]}>
                                             <ThemedText style={styles.orderBadgeText}>
                                                 {unreadMessageCount > 9 ? '9+' : unreadMessageCount}
+                                            </ThemedText>
+                                        </Animated.View>
+                                    )}
+
+                                    {/* Review Badge */}
+                                    {item.hasReviewBadge && unreadReviewCount > 0 && (
+                                        <Animated.View style={[styles.orderBadge, { backgroundColor: '#FFD700' }, badgeAnimatedStyle]}>
+                                            <ThemedText style={[styles.orderBadgeText, { color: '#000' }]}>
+                                                {unreadReviewCount > 9 ? '9+' : unreadReviewCount}
                                             </ThemedText>
                                         </Animated.View>
                                     )}

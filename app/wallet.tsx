@@ -98,14 +98,14 @@ export default function WalletScreen() {
   };
 
   const handleInternalTransfer = async () => {
-    if (!businessWallet || !personalWallet) return;
+    if (!activeWallet || !personalWallet || activeWallet.type === 'personal') return;
     const amount = parseFloat(transferAmount);
     if (!amount || amount <= 0) return Alert.alert('Invalid Amount', 'Please enter a valid amount');
-    if (amount > businessWallet.balance) return Alert.alert('Insufficient Balance', 'Cannot transfer more than balance');
+    if (amount > activeWallet.balance) return Alert.alert('Insufficient Balance', 'Cannot transfer more than balance');
 
     try {
       const { error } = await supabase.rpc('transfer_internal', {
-        from_wallet_id: businessWallet.id,
+        from_wallet_id: activeWallet.id,
         to_wallet_id: personalWallet.id,
         amount: amount
       });

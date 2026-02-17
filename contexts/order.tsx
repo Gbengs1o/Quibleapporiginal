@@ -24,24 +24,31 @@ export interface Order {
     id: string;
     user_id: string;
     restaurant_id: string;
-    status: OrderStatus;
     total_amount: number;
-    delivery_fee?: number;
-    rider_id?: string;
-    pickup_latitude?: number;
-    pickup_longitude?: number;
-    dropoff_latitude?: number;
-    dropoff_longitude?: number;
+    status: OrderStatus;
     delivery_code?: string;
     created_at: string;
     updated_at: string;
     restaurant: {
         id: string;
         name: string;
-        image_url?: string;
+        image_url: string | null;
         address: string;
     };
     items: OrderItem[];
+    rider?: {
+        id: string;
+        user_id: string;
+        rider_photo: string | null;
+        vehicle_type?: string;
+        vehicle_plate?: string;
+        profile: {
+            first_name: string;
+            last_name: string;
+            phone_number: string;
+            profile_picture_url: string | null;
+        }
+    } | null;
 }
 
 interface OrderContextType {
@@ -62,7 +69,7 @@ interface OrderContextType {
             dropoff_lng?: number;
         }
     ) => Promise<string>;
-    cancelOrder: (orderId: string) => Promise<void>; // Added
+    cancelOrder: (orderId: string) => Promise<void>;
 }
 
 const OrderContext = createContext<OrderContextType | undefined>(undefined);
@@ -102,7 +109,7 @@ export function OrderProvider({ children }: { children: React.ReactNode }) {
             // 1. Fetch User Orders (Active)
             const { data: userOrdersData } = await supabase
                 .from('orders')
-                .select('*, restaurant:restaurants(*), items:order_items(*, menu_item:menu_items(*))')
+                .select('*, restaurant:restaurants(*), items:order_items(*, menu_item:menu_items(*)), rider:riders(*, profile:profiles(*))')
                 .eq('user_id', user?.id)
                 .in('status', ['received', 'preparing', 'ready', 'with_rider', 'out_for_delivery'])
                 .order('created_at', { ascending: false });
@@ -112,7 +119,7 @@ export function OrderProvider({ children }: { children: React.ReactNode }) {
             // 2. Fetch User Orders (Past)
             const { data: pastOrdersData } = await supabase
                 .from('orders')
-                .select('*, restaurant:restaurants(*), items:order_items(*, menu_item:menu_items(*))')
+                .select('*, restaurant:restaurants(*), items:order_items(*, menu_item:menu_items(*)), rider:riders(*, profile:profiles(*))')
                 .eq('user_id', user?.id)
                 .in('status', ['delivered', 'cancelled'])
                 .order('created_at', { ascending: false })
@@ -124,7 +131,7 @@ export function OrderProvider({ children }: { children: React.ReactNode }) {
             // Ideally we check if they have a restaurant first
             const { data: restOrdersData } = await supabase
                 .from('orders')
-                .select('*, items:order_items(*, menu_item:menu_items(*))')
+                .select('*, items:order_items(*, menu_item:menu_items(*)), rider:riders(*, profile:profiles(*))')
                 // This relies on the RLS policy "Owners can view restaurant orders"
                 // We filter by client side or rely on RLS returning only what they own. 
                 // However, 'select' without filter fetches all rows visible to user.

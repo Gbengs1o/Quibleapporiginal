@@ -132,16 +132,16 @@ export function WalletProvider({ children }: { children: React.ReactNode }) {
                 setBusinessWallet(bWallet as any);
             }
 
-            // Fetch Rider Wallet
-            const { data: rWallet, error: rError } = await supabase
+            // Fetch Rider Wallet (separate wallet with type='rider')
+            const { data: rWallet } = await supabase
                 .from('wallets')
-                .select('*, rider:riders!inner(user_id)')
-                .eq('rider.user_id', user?.id)
+                .select('*')
+                .eq('user_id', user?.id)
                 .eq('type', 'rider')
                 .maybeSingle();
 
             if (rWallet) {
-                setRiderWallet(rWallet as any);
+                setRiderWallet(rWallet);
             }
 
         } catch (error) {
