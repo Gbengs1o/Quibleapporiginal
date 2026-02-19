@@ -334,10 +334,10 @@ export default function OrderDetailScreen() {
             // 1. Submit Restaurant Review
             if (restaurantRating > 0 && !existingReview) {
                 const itemReviews = Object.entries(itemRatings)
-                    .filter(([, val]) => val.rating > 0)
+                    .filter(([, val]) => val.rating > 0 || (val.comment && val.comment.trim().length > 0))
                     .map(([itemId, val]) => ({
                         order_item_id: itemId,
-                        rating: val.rating,
+                        rating: val.rating || 0, // Ensure rating is at least 0 if only comment is provided
                         comment: val.comment || null
                     }));
 

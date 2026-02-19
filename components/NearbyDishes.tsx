@@ -25,6 +25,7 @@ interface NearbyDishesProps {
     searchQuery?: string;
     categoryFilter?: string | null;
     priceRange?: string;
+    ratingFilter?: number;
     sortBy?: string;
     ListHeaderComponent?: React.ComponentType<any> | React.ReactElement | null;
     contentContainerStyle?: ViewStyle;
@@ -84,6 +85,12 @@ const DishCard = memo(({ item, onAdd, inCart, themeColors }: any) => {
                     <ThemedText style={[styles.restaurantName, { color: themeColors.secondaryText }]} numberOfLines={1}>
                         {item.restaurant?.name}
                     </ThemedText>
+                    {item.rating > 0 && (
+                        <View style={styles.ratingBadge}>
+                            <Ionicons name="star" size={10} color="#FFD700" />
+                            <ThemedText style={styles.ratingText}>{item.rating} ({item.review_count})</ThemedText>
+                        </View>
+                    )}
                 </View>
 
                 <ThemedText style={[styles.dishName, { color: themeColors.textColor }]} numberOfLines={1}>
@@ -152,6 +159,7 @@ const NearbyDishes: React.FC<NearbyDishesProps> = ({
     searchQuery = '',
     categoryFilter = null,
     priceRange = 'all',
+    ratingFilter = 0,
     sortBy = 'distance',
     ListHeaderComponent,
     contentContainerStyle
@@ -201,7 +209,12 @@ const NearbyDishes: React.FC<NearbyDishesProps> = ({
         else if (priceRange === 'mid') result = result.filter(d => d.price > 2000 && d.price <= 5000);
         else if (priceRange === 'premium') result = result.filter(d => d.price > 5000);
 
-        // 4. Sorting
+        // 4. Rating
+        if (ratingFilter > 0) {
+            result = result.filter(d => (d.rating || 0) >= ratingFilter);
+        }
+
+        // 5. Sorting
         result.sort((a, b) => {
             if (sortBy === 'price_low') return a.price - b.price;
             if (sortBy === 'price_high') return b.price - a.price;
@@ -210,7 +223,7 @@ const NearbyDishes: React.FC<NearbyDishesProps> = ({
         });
 
         return result;
-    }, [dishes, searchQuery, categoryFilter, priceRange, sortBy]);
+    }, [dishes, searchQuery, categoryFilter, priceRange, ratingFilter, sortBy]);
 
     const chunkedData = useMemo(() => {
         const chunks = [];
@@ -287,6 +300,8 @@ const styles = StyleSheet.create({
     restaurantLogo: { width: 24, height: 24, borderRadius: 12, backgroundColor: '#eee' },
     restaurantLogoPlaceholder: { width: 24, height: 24, borderRadius: 12, backgroundColor: '#ccc', justifyContent: 'center', alignItems: 'center' },
     restaurantName: { fontSize: 13, flex: 1 },
+    ratingBadge: { flexDirection: 'row', alignItems: 'center', gap: 2, backgroundColor: 'rgba(255, 215, 0, 0.15)', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 8 },
+    ratingText: { fontSize: 10, fontWeight: '700', color: '#B8860B' },
     dishName: { fontSize: 18, fontWeight: '700', marginBottom: 6 },
     bottomRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-end' },
     priceLabel: { fontSize: 11, color: '#888', marginBottom: 2 },

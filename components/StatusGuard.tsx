@@ -10,7 +10,7 @@ import { ActivityIndicator, StyleSheet, TouchableOpacity, View } from 'react-nat
 
 type StatusGuardProps = {
     children: React.ReactNode;
-    type: 'rider' | 'restaurant';
+    type: 'rider' | 'restaurant' | 'store';
 };
 
 export default function StatusGuard({ children, type }: StatusGuardProps) {
@@ -24,7 +24,7 @@ export default function StatusGuard({ children, type }: StatusGuardProps) {
 
         const checkStatus = async () => {
             try {
-                const table = type === 'rider' ? 'riders' : 'restaurants';
+                const table = type === 'rider' ? 'riders' : type === 'store' ? 'stores' : 'restaurants';
                 const idField = type === 'rider' ? 'user_id' : 'owner_id';
 
                 const { data, error } = await supabase
@@ -60,7 +60,7 @@ export default function StatusGuard({ children, type }: StatusGuardProps) {
             .on('postgres_changes', {
                 event: 'UPDATE',
                 schema: 'public',
-                table: type === 'rider' ? 'riders' : 'restaurants',
+                table: type === 'rider' ? 'riders' : type === 'store' ? 'stores' : 'restaurants',
                 filter: `${type === 'rider' ? 'user_id' : 'owner_id'}=eq.${user.id}`
             }, (payload) => {
                 if (payload.new && payload.new.status) {

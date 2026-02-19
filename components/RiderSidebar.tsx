@@ -69,28 +69,26 @@ const RiderSidebar = () => {
     };
 
     const menuItems = [
-        { name: 'Dashboard', icon: 'home-outline', activeIcon: 'home', route: '/rider/(dashboard)' },
+        { name: 'Dashboard', icon: 'home-outline', activeIcon: 'home', route: '/rider' },
         {
             name: 'Delivery Requests',
             icon: 'document-text-outline',
             activeIcon: 'document-text',
-            route: '/rider/(dashboard)/deliveries',
-            route: '/rider/(dashboard)/deliveries',
+            route: '/rider/deliveries',
             badge: pendingDeliveries + pendingFoodInvites
         },
         {
             name: 'Messages',
             icon: 'chatbubbles-outline',
             activeIcon: 'chatbubbles',
-            route: '/rider/(dashboard)/messages',
+            route: '/rider/messages',
             badge: unreadMessages
         },
-        { name: 'Payments and earning', icon: 'card-outline', activeIcon: 'card', route: '/rider/(dashboard)/payments' },
-        { name: 'Wallet', icon: 'wallet-outline', activeIcon: 'wallet', route: '/rider/(dashboard)/wallet' },
-        { name: 'Reviews', icon: 'star-outline', activeIcon: 'star', route: '/rider/(dashboard)/reviews' },
-        { name: 'Profile & Settings', icon: 'person-outline', activeIcon: 'person', route: '/rider/(dashboard)/settings' },
-        { name: 'Analytics', icon: 'bar-chart-outline', activeIcon: 'bar-chart', route: '/rider/(dashboard)/analytics' },
-        { name: 'Support & Help', icon: 'headset-outline', activeIcon: 'headset', route: '/rider/(dashboard)/support' },
+        { name: 'Payments and earning', icon: 'card-outline', activeIcon: 'card', route: '/rider/payments' },
+        { name: 'Wallet', icon: 'wallet-outline', activeIcon: 'wallet', route: '/rider/wallet' },
+        { name: 'Reviews', icon: 'star-outline', activeIcon: 'star', route: '/rider/reviews' },
+        { name: 'Profile & Settings', icon: 'person-outline', activeIcon: 'person', route: '/rider/settings' },
+        { name: 'Analytics', icon: 'bar-chart-outline', activeIcon: 'bar-chart', route: '/rider/analytics' },
     ];
 
     const handleNavigate = (route: string) => {
@@ -110,10 +108,10 @@ const RiderSidebar = () => {
     };
 
     const isActive = (route: string) => {
-        if (route === '/rider/(dashboard)') {
-            return pathname === '/rider/(dashboard)' || pathname === '/rider/(dashboard)/index';
+        if (route === '/rider') {
+            return pathname === '/rider' || pathname === '/rider/' || pathname === '/rider/index';
         }
-        return pathname.startsWith(route);
+        return pathname === route || pathname.startsWith(route + '/');
     };
 
     const displayName = profile ? `${profile.first_name || ''} ${profile.last_name || ''}`.trim() : 'Rider';

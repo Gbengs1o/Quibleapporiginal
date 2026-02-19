@@ -3,6 +3,7 @@ import { useThemeColor } from '@/hooks/use-theme-color';
 import { Feather, Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import React, { useState } from 'react';
 import {
+    Dimensions,
     Modal,
     ScrollView,
     StyleSheet,
@@ -15,6 +16,7 @@ import { ThemedText } from './themed-text';
 export type ServiceCategory = 'all' | 'delivery' | 'food' | 'handy' | 'store';
 export type SortOption = 'distance' | 'price_low' | 'price_high' | 'name';
 export type PriceRange = 'all' | 'budget' | 'mid' | 'premium';
+export type RatingFilter = 0 | 3 | 3.5 | 4 | 4.5;
 
 interface HomeCategoriesProps {
     selectedCategory: ServiceCategory;
@@ -28,6 +30,8 @@ interface HomeCategoriesProps {
     onSortChange: (sort: SortOption) => void;
     priceRange: PriceRange;
     onPriceRangeChange: (range: PriceRange) => void;
+    ratingFilter: RatingFilter;
+    onRatingFilterChange: (rating: RatingFilter) => void;
 }
 
 const CATEGORIES: { id: ServiceCategory; label: string; icon: string; iconType: 'ionicons' | 'material' | 'feather' }[] = [
@@ -53,6 +57,14 @@ const PRICE_RANGES: { id: PriceRange; label: string; description: string }[] = [
     { id: 'premium', label: 'Premium', description: 'Above ₦5,000' },
 ];
 
+const RATING_OPTIONS: { id: RatingFilter; label: string; stars: string }[] = [
+    { id: 0, label: 'All Ratings', stars: '' },
+    { id: 3, label: '3+', stars: '★★★' },
+    { id: 3.5, label: '3.5+', stars: '★★★½' },
+    { id: 4, label: '4+', stars: '★★★★' },
+    { id: 4.5, label: '4.5+', stars: '★★★★½' },
+];
+
 const HomeCategories: React.FC<HomeCategoriesProps> = ({
     selectedCategory,
     onCategoryChange,
@@ -64,6 +76,8 @@ const HomeCategories: React.FC<HomeCategoriesProps> = ({
     onSortChange,
     priceRange,
     onPriceRangeChange,
+    ratingFilter,
+    onRatingFilterChange,
 }) => {
     const { theme } = useTheme();
     const isDark = theme === 'dark';
@@ -93,12 +107,14 @@ const HomeCategories: React.FC<HomeCategoriesProps> = ({
         dishCategoryFilter ? 1 : 0,
         sortBy !== 'distance' ? 1 : 0,
         priceRange !== 'all' ? 1 : 0,
+        ratingFilter > 0 ? 1 : 0,
     ].reduce((a, b) => a + b, 0);
 
     const clearAllFilters = () => {
         onDishCategoryChange(null);
         onSortChange('distance');
         onPriceRangeChange('all');
+        onRatingFilterChange(0);
     };
 
     return (
@@ -247,7 +263,12 @@ const HomeCategories: React.FC<HomeCategoriesProps> = ({
                             </TouchableOpacity>
                         </View>
 
-                        <ScrollView showsVerticalScrollIndicator={false}>
+                        <ScrollView
+                            showsVerticalScrollIndicator={true}
+                            nestedScrollEnabled={true}
+                            contentContainerStyle={{ paddingBottom: 60 }}
+                            style={{ maxHeight: Dimensions.get('window').height * 0.6 }}
+                        >
                             {/* Sort By */}
                             <ThemedText style={[styles.filterSectionTitle, { color: textColor }]}>
                                 Sort By
@@ -355,6 +376,42 @@ const HomeCategories: React.FC<HomeCategoriesProps> = ({
                                 ))}
                             </View>
 
+                            {/* Rating */}
+                            <ThemedText style={[styles.filterSectionTitle, { color: textColor }]}>
+                                Minimum Rating
+                            </ThemedText>
+                            <View style={styles.optionsGrid}>
+                                {RATING_OPTIONS.map((option) => (
+                                    <TouchableOpacity
+                                        key={option.id}
+                                        style={[
+                                            styles.optionButton,
+                                            { backgroundColor: pillBg },
+                                            ratingFilter === option.id && styles.optionButtonActive
+                                        ]}
+                                        onPress={() => onRatingFilterChange(option.id)}
+                                    >
+                                        {option.stars ? (
+                                            <ThemedText style={[
+                                                styles.ratingStarsText,
+                                                ratingFilter === option.id && { color: '#FFD700' }
+                                            ]}>
+                                                {option.stars}
+                                            </ThemedText>
+                                        ) : null}
+                                        <ThemedText style={[
+                                            styles.optionText,
+                                            { color: secondaryText },
+                                            ratingFilter === option.id && styles.optionTextActive
+                                        ]}>
+                                            {option.label}
+                                        </ThemedText>
+                                    </TouchableOpacity>
+                                ))}
+                            </View>
+
+                            <View style={{ height: 20 }} />
+
                             {/* Actions */}
                             <View style={styles.modalActions}>
                                 <TouchableOpacity
@@ -374,8 +431,6 @@ const HomeCategories: React.FC<HomeCategoriesProps> = ({
                                     </ThemedText>
                                 </TouchableOpacity>
                             </View>
-
-                            <View style={{ height: 40 }} />
                         </ScrollView>
                     </View>
                 </View>
@@ -535,6 +590,11 @@ const styles = StyleSheet.create({
     },
     optionTextActive: {
         color: '#fff',
+    },
+    ratingStarsText: {
+        fontSize: 11,
+        color: '#FFD700',
+        marginBottom: 2,
     },
     optionSubtext: {
         fontSize: 11,

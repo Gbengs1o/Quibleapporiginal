@@ -13,10 +13,16 @@ interface Wallet {
     type: WalletType;
     balance: number;
     user_id?: string;
+    rider_id?: string; // Added field
     restaurant?: {
         owner_id: string;
         name: string;
         logo_url: string | null;
+    };
+    store?: {
+        owner_id: string;
+        name: string;
+        image_url: string | null; // Assuming image_url or logo_url
     };
     rider?: {
         user_id: string;
@@ -103,7 +109,7 @@ export function WalletProvider({ children }: { children: React.ReactNode }) {
         }
     };
 
-    const fetchWallets = async () => {
+    const fetchWallets = async (): Promise<void> => {
         try {
             setIsLoading(true);
             const { data: pWallet, error: pError } = await supabase
@@ -127,21 +133,41 @@ export function WalletProvider({ children }: { children: React.ReactNode }) {
                 .maybeSingle();
 
             if (bWallet) {
-                // Supabase returns { ...wallet, restaurant: { owner_id: ... } }
-                // We just need the wallet part mostly, but having restaurant_id is key
                 setBusinessWallet(bWallet as any);
+            } else {
+                // If no restaurant wallet, check for store wallet
+                const { data: sWallet, error: sError } = await supabase
+                    .from('wallets')
+                    .select('*, store:stores!inner(owner_id, name)')
+                    .eq('store.owner_id', user?.id)
+                    .eq('type', 'business')
+                    .maybeSingle();
+
+                if (sWallet) {
+                    setBusinessWallet(sWallet as any);
+                }
             }
 
             // Fetch Rider Wallet (separate wallet with type='rider')
-            const { data: rWallet } = await supabase
-                .from('wallets')
-                .select('*')
+            // First get rider_id from riders table
+            const { data: riderData } = await supabase
+                .from('riders')
+                .select('id')
                 .eq('user_id', user?.id)
-                .eq('type', 'rider')
-                .maybeSingle();
+                .single();
 
-            if (rWallet) {
-                setRiderWallet(rWallet);
+            console.log('WalletProvider: Found Rider ID:', riderData?.id);
+            if (riderData) {
+                const { data: rWallet } = await supabase
+                    .from('wallets')
+                    .select('*')
+                    .eq('rider_id', riderData.id)
+                    .eq('type', 'rider')
+                    .maybeSingle();
+
+                if (rWallet) {
+                    setRiderWallet(rWallet);
+                }
             }
 
         } catch (error) {

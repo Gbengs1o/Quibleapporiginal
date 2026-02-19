@@ -81,15 +81,15 @@ export default function AnalyticsScreen() {
 
     const fetchAnalytics = async () => {
         try {
-            // 1. Get Restaurant ID
-            const { data: rest } = await supabase.from('restaurants').select('id').eq('owner_id', user?.id).single();
-            if (!rest) return;
+            // 1. Get Store ID
+            const { data: store } = await supabase.from('stores').select('id').eq('owner_id', user?.id).single();
+            if (!store) return;
 
             // 2. Fetch Orders (with status for breakdown)
             const { data: orders, error: ordersError } = await supabase
                 .from('orders')
                 .select('id, created_at, total_amount, status')
-                .eq('restaurant_id', rest.id);
+                .eq('store_id', store.id);
 
             if (ordersError) throw ordersError;
 
@@ -97,34 +97,34 @@ export default function AnalyticsScreen() {
             const orderIds = orders?.map(o => o.id) || [];
             const { data: items } = await supabase
                 .from('order_items')
-                .select('menu_item_id, quantity, price_at_time')
+                .select('store_item_id, quantity, price_at_time')
                 .in('order_id', orderIds);
 
-            // 4. Fetch Menu Item Names
-            const menuItemIds = [...new Set(items?.map(i => i.menu_item_id) || [])];
-            const { data: menuItems } = await supabase
-                .from('menu_items')
+            // 4. Fetch Store Item Names
+            const storeItemIds = [...new Set(items?.map(i => i.store_item_id) || [])];
+            const { data: storeItems } = await supabase
+                .from('store_items')
                 .select('id, name')
-                .select('id, name')
-                .in('id', menuItemIds.length > 0 ? menuItemIds : ['none']);
+                .in('id', storeItemIds.length > 0 ? storeItemIds : ['none']);
 
-            // 5. Fetch Reviews
-            const { data: reviews } = await supabase
-                .from('food_order_reviews')
-                .select('restaurant_rating')
-                .eq('restaurant_id', rest.id);
+            // 5. Fetch Reviews (Note: Review system needs to be adapted for stores. Assuming we use 'food_order_reviews' linked to store_id or similar later)
+            // For now, let's comment out or adapt if a reviews table exists for stores.
+            // If reviews are shared table but linked to store_id:
+            // const { data: reviews } = await supabase.from('store_reviews')....
+            // Placeholder: empty reviews
+            const reviews: any[] = [];
 
             // --- PROCESS DATA ---
 
             // A. Top Selling Items
             const itemMap = new Map<string, TopItem>();
             items?.forEach(item => {
-                const existing = itemMap.get(item.menu_item_id) || { id: item.menu_item_id, name: 'Unknown', quantity: 0, revenue: 0 };
+                const existing = itemMap.get(item.store_item_id) || { id: item.store_item_id, name: 'Unknown', quantity: 0, revenue: 0 };
                 existing.quantity += (item.quantity || 0);
                 existing.revenue += (item.quantity || 0) * (item.price_at_time || 0);
-                itemMap.set(item.menu_item_id, existing);
+                itemMap.set(item.store_item_id, existing);
             });
-            menuItems?.forEach(m => {
+            storeItems?.forEach(m => {
                 if (itemMap.has(m.id)) itemMap.get(m.id)!.name = m.name;
             });
             const topItems = Array.from(itemMap.values()).sort((a, b) => b.quantity - a.quantity).slice(0, 5);
@@ -179,15 +179,17 @@ export default function AnalyticsScreen() {
             const avgOrd = totalOrd > 0 ? totalRev / totalOrd : 0;
 
             // G. Review Calculation
+            // G. Review Calculation
             const totalReviews = reviews?.length || 0;
-            const totalRatingSum = reviews?.reduce((sum, r) => sum + (r.restaurant_rating || 0), 0) || 0;
+            // const totalRatingSum = reviews?.reduce((sum, r) => sum + (r.rating || 0), 0) || 0; // Adapted for theoretical store reviews
+            const totalRatingSum = 0;
             const avgRating = totalReviews > 0 ? totalRatingSum / totalReviews : 0;
 
             const dist = { 1: 0, 2: 0, 3: 0, 4: 0, 5: 0 };
-            reviews?.forEach(r => {
-                const rating = Math.round(r.restaurant_rating);
+            /* reviews?.forEach(r => {
+                const rating = Math.round(r.rating);
                 if (rating >= 1 && rating <= 5) dist[rating as 1 | 2 | 3 | 4 | 5]++;
-            });
+            }); */
 
             setData({
                 topItems,

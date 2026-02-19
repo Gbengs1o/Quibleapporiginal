@@ -6,6 +6,7 @@ import { useOrders } from '@/contexts/order'; // Added
 import { useWallet } from '@/contexts/wallet';
 import { useTheme } from '@/hooks/use-theme';
 import { useThemeColor } from '@/hooks/use-theme-color';
+import { supabase } from '@/utils/supabase'; // Re-adding
 import { Ionicons } from '@expo/vector-icons';
 import { BlurView } from 'expo-blur';
 import * as Location from 'expo-location';
@@ -45,11 +46,14 @@ export default function OrdersScreen() {
     const [statusTitle, setStatusTitle] = useState('');
     const [statusMessage, setStatusMessage] = useState('');
     const [statusRef, setStatusRef] = useState('');
+    const [showClosedModal, setShowClosedModal] = useState(false);
+    const [closedRestaurantName, setClosedRestaurantName] = useState('');
     const [isDelivery, setIsDelivery] = useState(true);
     const [userLocation, setUserLocation] = useState<{ latitude: number; longitude: number } | null>(null);
     const [deliveryFee, setDeliveryFee] = useState(0);
+    const [feeConfig, setFeeConfig] = useState({ food_base_fee: 500, food_per_km_rate: 100 });
 
-    // Initial Location Load
+    // Fetch delivery fee config + location on mount
     useEffect(() => {
         (async () => {
             try {
@@ -59,6 +63,15 @@ export default function OrdersScreen() {
                 setUserLocation({ latitude: loc.coords.latitude, longitude: loc.coords.longitude });
             } catch (err) {
                 console.log("Location fetch failed", err);
+            }
+        })();
+        // Fetch admin-configurable delivery fees
+        (async () => {
+            try {
+                const { data } = await supabase.from('delivery_config').select('food_base_fee, food_per_km_rate').single();
+                if (data) setFeeConfig(data);
+            } catch (err) {
+                console.log('Fee config fetch failed, using defaults', err);
             }
         })();
     }, []);
@@ -86,8 +99,7 @@ export default function OrdersScreen() {
         let totalFee = 0;
         restaurants.forEach(rest => {
             const dist = calculateDistance(userLocation.latitude, userLocation.longitude, rest.latitude, rest.longitude);
-            // ₦500 base + ₦100 per KM
-            const fee = 500 + (dist * 100);
+            const fee = feeConfig.food_base_fee + (dist * feeConfig.food_per_km_rate);
             totalFee += fee;
         });
 
@@ -112,6 +124,30 @@ export default function OrdersScreen() {
 
     const handleCheckout = async () => {
         if (items.length === 0) return;
+
+        // NEW: Check if restaurants are open
+        const uniqueRestaurantIds = Array.from(new Set(items.map(i => i.restaurant.id)));
+
+        try {
+            const { data: restaurants, error } = await supabase
+                .from('restaurants')
+                .select('id, name, is_open')
+                .in('id', uniqueRestaurantIds);
+
+            if (restaurants) {
+                const closedRestaurant = restaurants.find(r => r.is_open === false);
+                if (closedRestaurant) {
+                    if (closedRestaurant) {
+                        setClosedRestaurantName(closedRestaurant.name);
+                        setShowClosedModal(true);
+                        return;
+                    }
+                }
+            }
+        } catch (err) {
+            console.error("Error checking restaurant status", err);
+            // Optional: fail open or closed? Let's proceed if check fails to avoid blocking due to network.
+        }
 
         if (!session) {
             Alert.alert(
@@ -262,7 +298,7 @@ export default function OrdersScreen() {
                     const rest = items.find(i => i.restaurant.id === rId)?.restaurant;
                     if (rest) {
                         const dist = calculateDistance(userLocation.latitude, userLocation.longitude, rest.latitude, rest.longitude);
-                        restaurantDeliveryFee = 500 + (dist * 100);
+                        restaurantDeliveryFee = feeConfig.food_base_fee + (dist * feeConfig.food_per_km_rate);
                     }
                 }
 
@@ -273,8 +309,8 @@ export default function OrdersScreen() {
                 const locationData = {
                     pickup_lat: rest?.latitude,
                     pickup_lng: rest?.longitude,
-                    dropoff_lat: userLocation?.latitude,
-                    dropoff_lng: userLocation?.longitude
+                    dropoff_lat: isDelivery ? userLocation?.latitude : undefined,
+                    dropoff_lng: isDelivery ? userLocation?.longitude : undefined
                 };
 
                 await placeOrder(rId, orderTotal, order.items, locationData);
@@ -611,6 +647,46 @@ export default function OrdersScreen() {
                             </TouchableOpacity>
                         </Animated.View>
                     </View>
+                </BlurView>
+            </Modal>
+            {/* Closed Restaurant Warning Modal */}
+            <Modal
+                visible={showClosedModal}
+                transparent={true}
+                animationType="fade"
+                onRequestClose={() => setShowClosedModal(false)}
+            >
+                <BlurView intensity={20} style={StyleSheet.absoluteFill}>
+                    <TouchableOpacity
+                        style={[styles.modalOverlay, { justifyContent: 'center', alignItems: 'center' }]}
+                        activeOpacity={1}
+                        onPress={() => setShowClosedModal(false)}
+                    >
+                        <Animated.View
+                            entering={ZoomIn}
+                            style={[styles.statusCard, { backgroundColor: cardBg, width: '85%' }]}
+                        >
+                            <View style={styles.statusAnimationContainer}>
+                                <AnimatedEmoji emoji="😔" />
+                            </View>
+
+                            <ThemedText style={styles.statusTitle}>Restaurant Closed</ThemedText>
+                            <ThemedText style={styles.statusMessage}>
+                                Sorry, <ThemedText style={{ fontWeight: '700' }}>{closedRestaurantName}</ThemedText> is currently closed and not accepting orders.
+                            </ThemedText>
+
+                            <ThemedText style={[styles.statusMessage, { fontSize: 13, marginTop: 4, color: secondaryText }]}>
+                                Please remove their items from your cart to proceed with checkout.
+                            </ThemedText>
+
+                            <TouchableOpacity
+                                style={[styles.statusButton, { marginTop: 20, backgroundColor: '#ef4444' }]}
+                                onPress={() => setShowClosedModal(false)}
+                            >
+                                <ThemedText style={styles.statusButtonText}>Understood</ThemedText>
+                            </TouchableOpacity>
+                        </Animated.View>
+                    </TouchableOpacity>
                 </BlurView>
             </Modal>
         </ThemedView>

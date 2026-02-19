@@ -220,7 +220,6 @@ const RestaurantSidebar = (props: any) => {
         { name: 'Reviews', icon: 'star', type: 'Ionicons', route: '/restaurant/reviews', hasReviewBadge: true },
         { name: 'Messages', icon: 'chatbubble-ellipses', type: 'Ionicons', route: '/restaurant/messages', hasMessageBadge: true },
         { name: 'Profile & Settings', icon: 'person', type: 'Ionicons', route: '/restaurant/settings' },
-        { name: 'Support & Help', icon: 'help-circle', type: 'Ionicons', route: '/restaurant/support' },
         { name: 'Analytics', icon: 'bar-chart', type: 'Ionicons', route: '/restaurant/analytics' },
     ];
 
@@ -277,7 +276,7 @@ const RestaurantSidebar = (props: any) => {
                     {/* Menu Items */}
                     <View style={styles.menuContainer}>
                         {menuItems.map((item, index) => {
-                            const isActive = pathname === item.route;
+                            const isActive = pathname === item.route || pathname.startsWith(item.route + '/');
                             return (
                                 <TouchableOpacity
                                     key={index}

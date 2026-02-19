@@ -1,5 +1,5 @@
 import DeliveryCard from '@/components/DeliveryCard';
-import HomeCategories, { PriceRange, ServiceCategory, SortOption } from '@/components/HomeCategories';
+import HomeCategories, { PriceRange, RatingFilter, ServiceCategory, SortOption } from '@/components/HomeCategories';
 import HomeHeader from '@/components/HomeHeader';
 import LogoLoader from '@/components/LogoLoader';
 import NearbyDishes from '@/components/NearbyDishes';
@@ -28,6 +28,7 @@ const HomeScreen = () => {
   const [dishCategoryFilter, setDishCategoryFilter] = useState<string | null>(null);
   const [sortBy, setSortBy] = useState<SortOption>('distance');
   const [priceRange, setPriceRange] = useState<PriceRange>('all');
+  const [ratingFilter, setRatingFilter] = useState<RatingFilter>(0);
 
   const { getItemCount } = useCart();
   const router = useRouter();
@@ -100,6 +101,8 @@ const HomeScreen = () => {
         onSortChange={setSortBy}
         priceRange={priceRange}
         onPriceRangeChange={setPriceRange}
+        ratingFilter={ratingFilter}
+        onRatingFilterChange={setRatingFilter}
       />
 
       {/* Dynamic Content */}
@@ -147,6 +150,7 @@ const HomeScreen = () => {
           categoryFilter={dishCategoryFilter}
           sortBy={sortBy}
           priceRange={priceRange}
+          ratingFilter={ratingFilter}
           // Pass the header content here to scroll WITH the list
           ListHeaderComponent={renderHeaderContent()}
           contentContainerStyle={styles.scrollContent}

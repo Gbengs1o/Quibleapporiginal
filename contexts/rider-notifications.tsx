@@ -78,12 +78,13 @@ export const RiderNotificationsProvider = ({ children }: { children: React.React
                 .eq('status', 'pending');
             setPendingDeliveries(delCount || 0);
 
-            // 3. Pending Food Invites (from restaurants)
+            // 3. Pending Food Invites (from restaurants) — only count non-expired
             const { count: foodInviteCount } = await supabase
                 .from('order_rider_bids')
                 .select('*', { count: 'exact', head: true })
                 .eq('rider_id', session.user.id)
-                .eq('status', 'invited');
+                .eq('status', 'invited')
+                .or(`expired_at.is.null,expired_at.gt.${new Date().toISOString()}`);
             setPendingFoodInvites(foodInviteCount || 0);
 
             // 4. Unread Alerts (Notifications table)

@@ -46,6 +46,15 @@ interface DishDetail {
     };
 }
 
+interface Review {
+    id: string;
+    rating: number;
+    comment: string | null;
+    reviewer_name: string;
+    reviewer_avatar: string | null;
+    created_at: string;
+}
+
 interface SimilarDish {
     id: string;
     name: string;
@@ -64,6 +73,7 @@ export default function DishProfileScreen() {
     const [userLocation, setUserLocation] = useState<{ latitude: number; longitude: number } | null>(null);
     const [distance, setDistance] = useState<number | null>(null);
     const [isFavorite, setIsFavorite] = useState(false);
+    const [reviews, setReviews] = useState<Review[]>([]);
     const [quantity, setQuantity] = useState(1);
 
     const scrollY = useRef(new Animated.Value(0)).current;
@@ -123,6 +133,13 @@ export default function DishProfileScreen() {
                     .limit(5);
                 setSimilarDishes(similar || []);
             }
+
+            // Fetch reviews
+            const { data: reviewsData } = await supabase
+                .rpc('get_dish_reviews', { p_dish_id: id });
+
+            if (reviewsData) setReviews(reviewsData);
+
         } catch (error) {
             console.error(error);
         } finally {
@@ -326,6 +343,51 @@ export default function DishProfileScreen() {
                             </ScrollView>
                         </>
                     )}
+
+                    {/* Reviews Section */}
+                    <View style={[styles.divider, { marginTop: 25 }]} />
+                    <ThemedText style={styles.sectionLabel}>Reviews ({reviews.length})</ThemedText>
+
+                    {reviews.length > 0 ? (
+                        reviews.map((review) => (
+                            <View key={review.id} style={styles.reviewCard}>
+                                <View style={styles.reviewHeader}>
+                                    {review.reviewer_avatar ? (
+                                        <Image source={{ uri: review.reviewer_avatar }} style={styles.reviewerAvatar} />
+                                    ) : (
+                                        <View style={[styles.reviewerAvatar, { backgroundColor: '#ddd', justifyContent: 'center', alignItems: 'center' }]}>
+                                            <Ionicons name="person" size={20} color="#999" />
+                                        </View>
+                                    )}
+                                    <View style={{ flex: 1 }}>
+                                        <ThemedText style={styles.reviewerName}>{review.reviewer_name}</ThemedText>
+                                        <View style={{ flexDirection: 'row' }}>
+                                            {[...Array(5)].map((_, i) => (
+                                                <Ionicons
+                                                    key={i}
+                                                    name={i < review.rating ? "star" : "star-outline"}
+                                                    size={12}
+                                                    color="#f27c22"
+                                                />
+                                            ))}
+                                        </View>
+                                    </View>
+                                    <ThemedText style={styles.reviewDate}>
+                                        {new Date(review.created_at).toLocaleDateString()}
+                                    </ThemedText>
+                                </View>
+                                {review.comment && (
+                                    <ThemedText style={[styles.reviewComment, { color: secondaryText }]}>
+                                        {review.comment}
+                                    </ThemedText>
+                                )}
+                            </View>
+                        ))
+                    ) : (
+                        <ThemedText style={{ opacity: 0.5, marginTop: 10 }}>No reviews yet.</ThemedText>
+                    )}
+
+                    <View style={{ height: 40 }} />
                 </Animated.View>
             </Animated.ScrollView>
 
@@ -421,4 +483,10 @@ const styles = StyleSheet.create({
     qtyText: { fontSize: 18, fontWeight: 'bold', minWidth: 30, textAlign: 'center' },
     addButton: { flex: 1, flexDirection: 'row', backgroundColor: '#f27c22', paddingVertical: 16, borderRadius: 16, justifyContent: 'center', alignItems: 'center', gap: 10 },
     addButtonText: { color: '#fff', fontSize: 16, fontWeight: 'bold' },
+    reviewCard: { marginBottom: 20, paddingBottom: 15, borderBottomWidth: 1, borderBottomColor: '#eee' },
+    reviewHeader: { flexDirection: 'row', alignItems: 'center', gap: 12, marginBottom: 8 },
+    reviewerAvatar: { width: 40, height: 40, borderRadius: 20 },
+    reviewerName: { fontWeight: '600', fontSize: 14 },
+    reviewDate: { fontSize: 12, opacity: 0.5 },
+    reviewComment: { fontSize: 14, lineHeight: 20 },
 });

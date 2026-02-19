@@ -21,9 +21,6 @@ export default function RiderDashboardLayout() {
                     <Stack.Screen name="reviews" />
                     <Stack.Screen name="settings" />
                     <Stack.Screen name="analytics" />
-                    <Stack.Screen name="support" />
-                    <Stack.Screen name="support-contact" />
-                    <Stack.Screen name="help-feedback" />
                 </Stack>
                 <RiderDrawerOverlay />
                 {user && <RequestAlert riderId={user.id} />}

@@ -82,6 +82,11 @@ export default function SendPackageScreen() {
     const [selectedVehicles, setSelectedVehicles] = useState<string[]>(['bike']);
     const [media, setMedia] = useState<{ uri: string; type: 'image' | 'video' } | null>(null);
     const [showLowPriceModal, setShowLowPriceModal] = useState(false);
+    const [feeConfig, setFeeConfig] = useState({
+        item_intra_base_fee: 500, item_intra_per_km_rate: 100,
+        item_inter_base_fee: 1500, item_inter_per_km_rate: 200,
+        item_min_price: 500
+    });
 
     // Map State
     const [region, setRegion] = useState({
@@ -91,8 +96,8 @@ export default function SendPackageScreen() {
         longitudeDelta: 0.0421,
     });
 
-    // Minimum price is 50% of estimated
-    const minPrice = Math.max(500, Math.round(estimatedPrice * 0.5));
+    // Minimum price is 50% of estimated or admin-configured floor
+    const minPrice = Math.max(feeConfig.item_min_price, Math.round(estimatedPrice * 0.5));
 
     useEffect(() => {
         (async () => {
@@ -105,6 +110,18 @@ export default function SendPackageScreen() {
                 latitudeDelta: 0.05,
                 longitudeDelta: 0.05,
             });
+        })();
+        // Fetch admin-configurable delivery fees
+        (async () => {
+            try {
+                const { data } = await supabase
+                    .from('delivery_config')
+                    .select('item_intra_base_fee, item_intra_per_km_rate, item_inter_base_fee, item_inter_per_km_rate, item_min_price')
+                    .single();
+                if (data) setFeeConfig(data);
+            } catch (err) {
+                console.log('Fee config fetch failed, using defaults', err);
+            }
         })();
     }, []);
 
@@ -219,8 +236,8 @@ export default function SendPackageScreen() {
         setDistanceKm(dist);
         setDurationMin(dur);
 
-        const base = category === 'intra' ? 500 : 1500;
-        const rate = category === 'intra' ? 100 : 200;
+        const base = category === 'intra' ? feeConfig.item_intra_base_fee : feeConfig.item_inter_base_fee;
+        const rate = category === 'intra' ? feeConfig.item_intra_per_km_rate : feeConfig.item_inter_per_km_rate;
         const price = Math.round(base + (rate * dist));
 
         setEstimatedPrice(price);

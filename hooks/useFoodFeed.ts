@@ -11,6 +11,8 @@ export interface Dish {
     image_url: string | null;
     is_active: boolean;
     distance?: number;
+    rating?: number;
+    review_count?: number;
     restaurant: {
         id: string;
         name: string;
@@ -75,20 +77,31 @@ export const useFoodFeed = (maxDistance: number = 15) => {
 
         if (error) {
             console.error("Fetch error (menu_items):", error.message || error);
-            // Optional: You could show a specialized empty state here
         }
 
         if (data) {
-            const processed = processDishes(data, coords);
+            // Fetch ratings
+            const dishIds = data.map(d => d.id);
+            const { data: stats } = await supabase
+                .from('dish_stats')
+                .select('dish_id, average_rating, review_count')
+                .in('dish_id', dishIds);
+
+            // Create specific map for O(1) lookup
+            const statsMap = new Map(stats?.map(s => [s.dish_id, s]) || []);
+
+            const processed = processDishes(data, coords, statsMap);
             setDishes(processed);
         }
         setLoading(false);
     };
 
-    const processDishes = (rawItems: any[], coords: { latitude: number; longitude: number }) => {
+    const processDishes = (rawItems: any[], coords: { latitude: number; longitude: number }, statsMap?: Map<string, any>) => {
         return rawItems.map(d => ({
             ...d,
-            distance: calculateDistance(coords.latitude, coords.longitude, d.restaurant?.latitude, d.restaurant?.longitude)
+            distance: calculateDistance(coords.latitude, coords.longitude, d.restaurant?.latitude, d.restaurant?.longitude),
+            rating: parseFloat(statsMap?.get(d.id)?.average_rating) || 0,
+            review_count: parseInt(statsMap?.get(d.id)?.review_count) || 0
         })).filter(d => d.distance <= maxDistance);
     };
 
@@ -129,6 +142,13 @@ export const useFoodFeed = (maxDistance: number = 15) => {
 
         if (error || !fullDish || !fullDish.restaurant) return;
 
+        // Fetch rating for this single item
+        const { data: stats } = await supabase
+            .from('dish_stats')
+            .select('average_rating, review_count')
+            .eq('dish_id', newRecord.id)
+            .single();
+
         const distance = calculateDistance(
             userLocation!.latitude, userLocation!.longitude,
             fullDish.restaurant.latitude, fullDish.restaurant.longitude
@@ -140,7 +160,13 @@ export const useFoodFeed = (maxDistance: number = 15) => {
             return;
         }
 
-        const updatedDish: Dish = { ...fullDish, distance, restaurant: fullDish.restaurant };
+        const updatedDish: Dish = {
+            ...fullDish,
+            distance,
+            restaurant: fullDish.restaurant,
+            rating: parseFloat(stats?.average_rating) || 0,
+            review_count: parseInt(stats?.review_count) || 0
+        };
 
         setDishes(prev => {
             const index = prev.findIndex(d => d.id === newRecord.id);

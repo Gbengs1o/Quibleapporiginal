@@ -74,7 +74,12 @@ export const verifyTransaction = async (paymentReference: string) => {
 
         return data && data.success === true;
     } catch (error) {
-        console.error('Verification Error:', error);
+        // Check if it's a FunctionsHttpError (Edge Function failure)
+        if (error && typeof error === 'object' && 'context' in error) {
+            console.warn('Verification Warning (Edge Function):', error);
+        } else {
+            console.warn('Verification Error:', error);
+        }
         return false;
     }
 };

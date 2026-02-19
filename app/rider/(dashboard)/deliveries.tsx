@@ -8,7 +8,7 @@ import { useThemeColor } from '@/hooks/use-theme-color';
 import { supabase } from '@/utils/supabase';
 import { Ionicons } from '@expo/vector-icons';
 import { useLocalSearchParams, useRouter } from 'expo-router';
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { ActivityIndicator, Alert, FlatList, RefreshControl, StyleSheet, TouchableOpacity, View } from 'react-native';
 
 export default function DeliveryRequests() {
@@ -28,6 +28,8 @@ export default function DeliveryRequests() {
     const [loading, setLoading] = useState(true);
     const [refreshing, setRefreshing] = useState(false);
     const [processing, setProcessing] = useState<string | null>(null);
+    const [countdowns, setCountdowns] = useState<Record<string, number>>({});
+    const countdownRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
     useEffect(() => {
         if (tab && typeof tab === 'string' && ['logistics', 'active', 'food', 'history'].includes(tab)) {
@@ -151,6 +153,7 @@ export default function DeliveryRequests() {
                     amount: invite.amount,
                     status: invite.bid_status,
                     created_at: invite.created_at,
+                    expired_at: invite.expired_at || null,
                     order: {
                         id: invite.order_id,
                         total_amount: invite.order_total,
@@ -164,7 +167,17 @@ export default function DeliveryRequests() {
                 }));
 
                 setInvites(formattedInvites);
-                setRequests([]); // Clear requests as we use 'invites' state
+
+                // Initialize countdowns
+                const newCountdowns: Record<string, number> = {};
+                formattedInvites.forEach((inv: any) => {
+                    if (inv.expired_at && inv.status === 'invited') {
+                        const remaining = Math.max(0, Math.floor((new Date(inv.expired_at).getTime() - Date.now()) / 1000));
+                        newCountdowns[inv.id] = remaining;
+                    }
+                });
+                setCountdowns(newCountdowns);
+                setRequests([]);
             }
         } catch (error) {
             console.error(error);
@@ -224,6 +237,28 @@ export default function DeliveryRequests() {
         setRefreshing(true);
         fetchData();
     };
+
+    // Countdown timer for food invites
+    useEffect(() => {
+        if (activeTab !== 'food') return;
+        if (countdownRef.current) clearInterval(countdownRef.current);
+
+        countdownRef.current = setInterval(() => {
+            setCountdowns(prev => {
+                const updated = { ...prev };
+                for (const id of Object.keys(updated)) {
+                    if (updated[id] > 0) {
+                        updated[id] = updated[id] - 1;
+                    }
+                }
+                return updated;
+            });
+        }, 1000);
+
+        return () => {
+            if (countdownRef.current) clearInterval(countdownRef.current);
+        };
+    }, [activeTab, invites]);
 
     const getTitle = () => {
         switch (activeTab) {
@@ -353,25 +388,48 @@ export default function DeliveryRequests() {
 
         const restaurant = order?.restaurant;
         const isProcessing = processing === order.id;
+        const countdown = countdowns[item.id];
+        const isExpired = item.status === 'expired' || (countdown !== undefined && countdown <= 0);
 
         return (
             <TouchableOpacity
-                style={[styles.card, { backgroundColor: cardBg }]}
-                onPress={() => router.push(`/rider/job-preview/${order.id}?amount=${item.amount}`)}
+                style={[styles.card, { backgroundColor: cardBg, borderLeftWidth: isExpired ? 3 : 0, borderLeftColor: '#EF4444' }]}
+                onPress={() => {
+                    if (!isExpired) {
+                        router.push(`/rider/job-preview/${order.id}?amount=${item.amount}`);
+                    }
+                }}
                 activeOpacity={0.7}
             >
                 <View style={styles.cardHeader}>
                     <View style={styles.row}>
                         <View style={styles.iconBox}>
-                            <Ionicons name="restaurant" size={20} color="#F27C22" />
+                            <Ionicons name="restaurant" size={20} color={isExpired ? '#EF4444' : '#F27C22'} />
                         </View>
                         <View>
                             <ThemedText style={styles.restaurantName}>{restaurant?.name || 'Restaurant'}</ThemedText>
                             <ThemedText style={styles.timestamp}>{new Date(item.created_at).toLocaleTimeString()}</ThemedText>
                         </View>
                     </View>
-                    <ThemedText style={styles.price}>₦{item.amount}</ThemedText>
+                    <View style={{ alignItems: 'flex-end' }}>
+                        <ThemedText style={styles.price}>₦{item.amount}</ThemedText>
+                        {!isExpired && countdown !== undefined && countdown > 0 && (
+                            <View style={{ backgroundColor: countdown <= 5 ? '#FEE2E2' : '#FEF3C7', paddingHorizontal: 8, paddingVertical: 3, borderRadius: 10, marginTop: 4 }}>
+                                <ThemedText style={{ fontSize: 11, fontWeight: 'bold', color: countdown <= 5 ? '#EF4444' : '#D97706' }}>
+                                    ⏱ {countdown}s left
+                                </ThemedText>
+                            </View>
+                        )}
+                    </View>
                 </View>
+
+                {isExpired && (
+                    <View style={{ backgroundColor: '#FEE2E2', padding: 10, borderRadius: 8, marginTop: 8 }}>
+                        <ThemedText style={{ color: '#EF4444', fontSize: 13, fontWeight: '600', textAlign: 'center' }}>
+                            ⏰ Expired — You didn't respond in time
+                        </ThemedText>
+                    </View>
+                )}
 
                 <View style={styles.divider} />
 
@@ -382,40 +440,44 @@ export default function DeliveryRequests() {
                     </ThemedText>
                 </View>
 
-                {/* View Details Prompt */}
-                <View style={{ alignItems: 'center', paddingVertical: 10 }}>
-                    <ThemedText style={{ color: '#F27C22', fontSize: 13, fontWeight: '600' }}>
-                        Tap to view distance, ETA & map →
-                    </ThemedText>
-                </View>
+                {!isExpired && (
+                    <>
+                        {/* View Details Prompt */}
+                        <View style={{ alignItems: 'center', paddingVertical: 10 }}>
+                            <ThemedText style={{ color: '#F27C22', fontSize: 13, fontWeight: '600' }}>
+                                Tap to view distance, ETA & map →
+                            </ThemedText>
+                        </View>
 
-                <View style={styles.actions}>
-                    <TouchableOpacity
-                        style={[styles.actionButton, styles.rejectBtn]}
-                        onPress={(e) => {
-                            e.stopPropagation();
-                            handleRespondToInvite(order.id, 'rejected');
-                        }}
-                        disabled={isProcessing || processing !== null}
-                    >
-                        <ThemedText style={[styles.btnText, { color: '#EF4444' }]}>Decline</ThemedText>
-                    </TouchableOpacity>
+                        <View style={styles.actions}>
+                            <TouchableOpacity
+                                style={[styles.actionButton, styles.rejectBtn]}
+                                onPress={(e) => {
+                                    e.stopPropagation();
+                                    handleRespondToInvite(order.id, 'rejected');
+                                }}
+                                disabled={isProcessing || processing !== null}
+                            >
+                                <ThemedText style={[styles.btnText, { color: '#EF4444' }]}>Decline</ThemedText>
+                            </TouchableOpacity>
 
-                    <TouchableOpacity
-                        style={[styles.actionButton, styles.acceptBtn]}
-                        onPress={(e) => {
-                            e.stopPropagation();
-                            handleRespondToInvite(order.id, 'accepted');
-                        }}
-                        disabled={isProcessing || processing !== null}
-                    >
-                        {isProcessing ? (
-                            <ActivityIndicator color="#fff" size="small" />
-                        ) : (
-                            <ThemedText style={[styles.btnText, { color: '#fff' }]}>Accept Order</ThemedText>
-                        )}
-                    </TouchableOpacity>
-                </View>
+                            <TouchableOpacity
+                                style={[styles.actionButton, styles.acceptBtn]}
+                                onPress={(e) => {
+                                    e.stopPropagation();
+                                    handleRespondToInvite(order.id, 'accepted');
+                                }}
+                                disabled={isProcessing || processing !== null}
+                            >
+                                {isProcessing ? (
+                                    <ActivityIndicator color="#fff" size="small" />
+                                ) : (
+                                    <ThemedText style={[styles.btnText, { color: '#fff' }]}>Accept Order</ThemedText>
+                                )}
+                            </TouchableOpacity>
+                        </View>
+                    </>
+                )}
             </TouchableOpacity>
         );
     };

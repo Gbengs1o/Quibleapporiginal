@@ -47,7 +47,7 @@ interface DashboardStats {
     totalReviews: number;
 }
 
-export default function RestaurantDashboard() {
+export default function StoreDashboard() {
     const { openMenu } = useRestaurantMenu();
     const { user } = useAuth();
     const router = useRouter();
@@ -77,7 +77,7 @@ export default function RestaurantDashboard() {
     const fetchDashboardData = async () => {
         try {
             const { data: rest, error: restError } = await supabase
-                .from('restaurants')
+                .from('stores')
                 .select('*')
                 .eq('owner_id', user?.id)
                 .single();
@@ -91,13 +91,15 @@ export default function RestaurantDashboard() {
                 const { data: orders } = await supabase
                     .from('orders')
                     .select('id, total_amount, status, created_at')
-                    .eq('restaurant_id', rest.id);
+                    .eq('store_id', rest.id);
 
-                // 2. Fetch reviews (Real Data from food_order_reviews)
-                const { data: reviewsData } = await supabase
+                // 2. Fetch reviews
+                const { data: reviews } = await supabase
                     .from('food_order_reviews')
                     .select('restaurant_rating')
-                    .eq('restaurant_id', rest.id);
+                    .eq('store_id', rest.id);
+
+                const reviewsData = reviews || [];
 
                 let avgRating = 0;
                 let reviewCount = 0;
@@ -152,7 +154,7 @@ export default function RestaurantDashboard() {
         setIsOpen(value); // Optimistic visual update
         try {
             const { error } = await supabase
-                .from('restaurants')
+                .from('stores')
                 .update({ is_open: value })
                 .eq('id', restaurant?.id);
 
@@ -230,7 +232,7 @@ export default function RestaurantDashboard() {
                                 <View style={styles.notifBadge} />
                             </TouchableOpacity>
 
-                            <TouchableOpacity onPress={() => router.push('/restaurant/settings')}>
+                            <TouchableOpacity onPress={() => router.push('/store/settings')}>
                                 <Image
                                     source={{ uri: restaurant?.logo_url || 'https://via.placeholder.com/60' }}
                                     style={styles.avatar}
@@ -245,7 +247,7 @@ export default function RestaurantDashboard() {
                             {/* Activity Card */}
                             <TouchableOpacity
                                 style={styles.darkCard}
-                                onPress={() => router.push('/restaurant/analytics')}
+                                onPress={() => router.push('/store/analytics')}
                             >
                                 <View style={styles.cardHeader}>
                                     <ThemedText style={styles.cardTitle}>Activity</ThemedText>
@@ -266,7 +268,7 @@ export default function RestaurantDashboard() {
                             {/* Profit Card */}
                             <TouchableOpacity
                                 style={styles.darkCard}
-                                onPress={() => router.push('/restaurant/analytics')}
+                                onPress={() => router.push('/store/analytics')}
                             >
                                 <View style={styles.cardHeader}>
                                     <ThemedText style={styles.cardTitle}>Profit</ThemedText>
@@ -318,19 +320,19 @@ export default function RestaurantDashboard() {
                     <View style={styles.actionContainer}>
                         <TouchableOpacity
                             style={styles.addButton}
-                            onPress={() => router.push('/restaurant/menu')}
+                            onPress={() => router.push('/store/menu')}
                         >
                             <Ionicons name="add" size={24} color="white" />
-                            <ThemedText style={styles.addButtonText}>Add new item</ThemedText>
+                            <ThemedText style={styles.addButtonText}>Add new product</ThemedText>
                         </TouchableOpacity>
                     </View>
 
                     {/* Bottom Stats Grid */}
                     <View style={styles.bottomSection}>
                         {[
-                            { label: 'Total Orders', value: stats.totalOrders.toString(), trend: '+20%', link: '/restaurant/orders' },
+                            { label: 'Total Orders', value: stats.totalOrders.toString(), trend: '+20%', link: '/store/orders' },
                             { label: 'Total Sales', value: `₦${stats.totalRevenue.toLocaleString()}`, trend: '+15%', link: null },
-                            { label: 'Total Pending', value: stats.pendingOrders.toString(), trend: '-5%', link: '/restaurant/orders' }
+                            { label: 'Total Pending', value: stats.pendingOrders.toString(), trend: '-5%', link: '/store/orders' }
                         ].map((item, index) => (
                             <TouchableOpacity
                                 key={index}

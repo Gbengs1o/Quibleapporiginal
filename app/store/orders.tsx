@@ -38,7 +38,7 @@ export default function OrdersScreen() {
     const { openMenu } = useRestaurantMenu();
     const router = useRouter();
     const { startCall } = useCall();
-    const { restaurantOrders, refreshOrders, updateOrderStatus, cancelOrder, loading } = useOrders();
+    const { storeOrders, refreshOrders, updateOrderStatus, cancelOrder, loading } = useOrders();
     const theme = useThemeColor({ light: 'light', dark: 'dark' }, 'text') === 'dark' ? 'dark' : 'light';
     const isDark = theme === 'dark';
     // ... theme hooks ...
@@ -161,7 +161,7 @@ export default function OrdersScreen() {
                                 <ThemedText style={styles.quantityText}>{item.quantity}x</ThemedText>
                             </View>
                             <View style={styles.itemInfo}>
-                                <ThemedText style={styles.itemName}>{item.menu_item?.name}</ThemedText>
+                                <ThemedText style={styles.itemName}>{item.menu_item?.name || item.store_item?.name}</ThemedText>
                                 {item.options && (
                                     <ThemedText style={[styles.itemOptions, { color: subtleText }]}>
                                         {item.options}
@@ -294,7 +294,7 @@ export default function OrdersScreen() {
                                             setShowVerifyModal(true);
                                         } else {
                                             // Navigate to rider selection page
-                                            router.push(`/restaurant/select-rider?orderId=${order.id}`);
+                                            router.push(`/store/select-rider?orderId=${order.id}`);
                                         }
                                     } else {
                                         handleAction(order.id, action.next);
@@ -330,16 +330,16 @@ export default function OrdersScreen() {
                 <View style={styles.headerContent}>
                     <ThemedText style={styles.headerTitle}>Orders</ThemedText>
                     <ThemedText style={styles.headerSubtitle}>
-                        {restaurantOrders.length} active order{restaurantOrders.length !== 1 ? 's' : ''}
+                        {storeOrders.length} active order{storeOrders.length !== 1 ? 's' : ''}
                     </ThemedText>
                 </View>
                 <View style={styles.headerBadge}>
-                    <ThemedText style={styles.headerBadgeText}>{restaurantOrders.length}</ThemedText>
+                    <ThemedText style={styles.headerBadgeText}>{storeOrders.length}</ThemedText>
                 </View>
             </LinearGradient>
 
             <FlatList
-                data={restaurantOrders}
+                data={storeOrders}
                 renderItem={renderOrderItem}
                 keyExtractor={item => item.id}
                 contentContainerStyle={styles.listContent}

@@ -7,7 +7,7 @@ import { supabase } from '@/utils/supabase';
 import { Ionicons } from '@expo/vector-icons';
 import * as Location from 'expo-location';
 import { useLocalSearchParams, useRouter } from 'expo-router';
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import {
     ActivityIndicator,
     Alert,
@@ -80,6 +80,8 @@ export default function JobPreviewScreen() {
         toCustomer: 0,
         total: 0,
     });
+    const [inviteCountdown, setInviteCountdown] = useState<number | null>(null);
+    const countdownRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
     useEffect(() => {
         fetchData();
@@ -128,6 +130,27 @@ export default function JobPreviewScreen() {
                 }
             };
             setOrderDetails(formattedOrder as OrderDetails);
+
+            // Check invite expiry
+            const { data: bidData } = await supabase
+                .from('order_rider_bids')
+                .select('id, status, expired_at')
+                .eq('order_id', orderId)
+                .eq('rider_id', session?.user?.id)
+                .in('status', ['invited', 'expired'])
+                .maybeSingle();
+
+            if (bidData) {
+                if (bidData.status === 'expired') {
+                    // Silently go back — rider is notified via the notifications page
+                    router.back();
+                    return;
+                }
+                if (bidData.expired_at) {
+                    const remaining = Math.max(0, Math.floor((new Date(bidData.expired_at).getTime() - Date.now()) / 1000));
+                    setInviteCountdown(remaining);
+                }
+            }
 
             // Calculate distances and ETAs
             if (riderLocation && formattedOrder.pickup_latitude && formattedOrder.dropoff_latitude) {
@@ -187,6 +210,30 @@ export default function JobPreviewScreen() {
             }
         }
     }, [riderLocation, orderDetails]);
+
+    // Countdown interval
+    useEffect(() => {
+        if (inviteCountdown === null || inviteCountdown <= 0) return;
+        if (countdownRef.current) clearInterval(countdownRef.current);
+
+        countdownRef.current = setInterval(() => {
+            setInviteCountdown(prev => {
+                if (prev === null) return null;
+                const next = prev - 1;
+                if (next <= 0) {
+                    if (countdownRef.current) clearInterval(countdownRef.current);
+                    // Silently go back — rider is notified via the notifications page
+                    router.back();
+                    return 0;
+                }
+                return next;
+            });
+        }, 1000);
+
+        return () => {
+            if (countdownRef.current) clearInterval(countdownRef.current);
+        };
+    }, [inviteCountdown !== null && inviteCountdown > 0]);
 
     const handleResponse = async (response: 'accepted' | 'rejected') => {
         if (!session?.user?.id || !orderId) return;
@@ -381,6 +428,15 @@ export default function JobPreviewScreen() {
 
             {/* Bottom Actions */}
             <View style={[styles.bottomActions, { backgroundColor: cardBg }]}>
+                {inviteCountdown !== null && inviteCountdown > 0 && (
+                    <View style={{ position: 'absolute', top: -30, left: 0, right: 0, alignItems: 'center' }}>
+                        <View style={{ backgroundColor: inviteCountdown <= 5 ? '#FEE2E2' : '#FEF3C7', paddingHorizontal: 14, paddingVertical: 6, borderRadius: 16 }}>
+                            <ThemedText style={{ fontSize: 13, fontWeight: 'bold', color: inviteCountdown <= 5 ? '#EF4444' : '#D97706' }}>
+                                ⏱ Respond within {inviteCountdown}s
+                            </ThemedText>
+                        </View>
+                    </View>
+                )}
                 <TouchableOpacity
                     style={[styles.actionBtn, styles.declineBtn]}
                     onPress={() => handleResponse('rejected')}

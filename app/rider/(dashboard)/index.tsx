@@ -10,13 +10,15 @@ import { Ionicons } from '@expo/vector-icons';
 import { useNavigation, useRouter } from 'expo-router';
 import React, { useEffect, useState } from 'react';
 import {
+    Animated,
+    Easing,
     Image,
     ScrollView,
     StatusBar,
     StyleSheet,
     Text,
     TouchableOpacity,
-    View,
+    View
 } from 'react-native';
 
 // --- Components ---
@@ -138,6 +140,9 @@ export default function RiderDashboard() {
     const iconColor = useThemeColor({ light: '#1F2050', dark: '#FFFFFF' }, 'text');
     const statusBarStyle = useThemeColor({ light: 'dark-content', dark: 'light-content' }, 'text') as any;
 
+    // Animation
+    const toggleAnim = React.useRef(new Animated.Value(0)).current;
+
     // State
     const [isOnline, setIsOnline] = useState(false);
     const [riderData, setRiderData] = useState<any>(null);
@@ -164,51 +169,57 @@ export default function RiderDashboard() {
 
     const fetchAllData = async () => {
         if (!session?.user.id) return;
-        await Promise.all([
-            fetchRiderStatus(),
-            fetchStats(),
-            refreshWallet()
-        ]);
-        setLoading(false);
+
+        try {
+            await refreshWallet();
+
+            // Fetch Rider Data First to get ID
+            const { data: rider } = await supabase
+                .from('riders')
+                .select('*')
+                .eq('user_id', session.user.id)
+                .single();
+
+            const { data: profile } = await supabase
+                .from('profiles')
+                .select('*')
+                .eq('id', session.user.id)
+                .single();
+
+            if (rider) {
+                setRiderData(rider);
+                setIsOnline(rider.is_online);
+                setAverageRating(rider.average_rating || 0);
+
+                // Initialize toggle animation
+                Animated.timing(toggleAnim, {
+                    toValue: rider.is_online ? 1 : 0,
+                    duration: 0,
+                    useNativeDriver: true
+                }).start();
+
+                await fetchStats(rider.id);
+            }
+
+            if (profile) {
+                setProfileData(profile);
+            }
+
+        } catch (e) {
+            console.error(e);
+        } finally {
+            setLoading(false);
+        }
     };
 
-    useEffect(() => {
-        if (!session?.user.id) return;
-        const sub = supabase.channel('dashboard-realtime')
-            .on('postgres_changes', { event: '*', schema: 'public', table: 'delivery_requests' }, () => {
-                fetchStats();
-            })
-            .subscribe();
-
-        return () => { supabase.removeChannel(sub); };
-    }, [session?.user.id]);
-
-    const fetchRiderStatus = async () => {
-        if (!session?.user.id) return;
-        const [riderRes, profileRes] = await Promise.all([
-            supabase.from('riders').select('*').eq('user_id', session.user.id).single(),
-            supabase.from('profiles').select('*').eq('id', session.user.id).single()
-        ]);
-
-        if (riderRes.data) {
-            setRiderData(riderRes.data);
-            setIsOnline(riderRes.data.is_online);
-            setAverageRating(riderRes.data.average_rating || 0);
-        }
-        if (profileRes.data) {
-            setProfileData(profileRes.data);
-        }
-    };
-
-    const fetchStats = async () => {
-        if (!session?.user.id) return;
+    const fetchStats = async (riderId: string) => {
         const startOfDay = new Date();
         startOfDay.setHours(0, 0, 0, 0);
 
         const { data: todayJobs } = await supabase
             .from('delivery_requests')
             .select('final_price')
-            .eq('rider_id', session.user.id)
+            .eq('rider_id', riderId)
             .eq('status', 'delivered')
             .gte('updated_at', startOfDay.toISOString());
 
@@ -221,8 +232,8 @@ export default function RiderDashboard() {
         const { data: history } = await supabase
             .from('delivery_requests')
             .select('*')
-            .eq('rider_id', session.user.id)
-            .in('status', ['delivered', 'cancelled', 'picked_up']) // Include broader range
+            .eq('rider_id', riderId)
+            .in('status', ['delivered', 'cancelled', 'picked_up'])
             .order('updated_at', { ascending: false })
             .limit(5);
 
@@ -234,6 +245,14 @@ export default function RiderDashboard() {
     const toggleOnline = async () => {
         const newVal = !isOnline;
         setIsOnline(newVal);
+
+        Animated.timing(toggleAnim, {
+            toValue: newVal ? 1 : 0,
+            duration: 300,
+            easing: Easing.bezier(0.4, 0.0, 0.2, 1),
+            useNativeDriver: true,
+        }).start();
+
         if (session?.user.id) {
             await supabase.from('riders').update({ is_online: newVal }).eq('user_id', session.user.id);
         }
@@ -290,13 +309,39 @@ export default function RiderDashboard() {
                         onPress={toggleOnline}
                         style={[
                             styles.onlineButton,
-                            { backgroundColor: isOnline ? '#009A49' : (textColor === '#FFFFFF' ? '#333' : '#E5E7EB') }
+                            {
+                                backgroundColor: isOnline ? '#009A49' : (textColor === '#FFFFFF' ? '#333' : '#E5E7EB'),
+                                overflow: 'hidden'
+                            }
                         ]}
                     >
-                        <Text style={[styles.onlineButtonText, { color: isOnline ? '#fff' : textColor }]}>
-                            {isOnline ? 'Go Offline' : 'Go online'}
-                        </Text>
-                        <View style={[styles.toggleCircle, { backgroundColor: isOnline ? '#fff' : (textColor === '#FFFFFF' ? '#666' : '#fff') }]} />
+                        <Animated.Text style={[
+                            styles.onlineButtonText,
+                            {
+                                color: isOnline ? '#fff' : textColor,
+                                opacity: toggleAnim.interpolate({
+                                    inputRange: [0, 1],
+                                    outputRange: [1, 1] // Adjust if needed
+                                })
+                            }
+                        ]}>
+                            {isOnline ? 'You are Online' : 'You are Offline'}
+                        </Animated.Text>
+
+                        <View style={styles.toggleTrack}>
+                            <Animated.View style={[
+                                styles.toggleCircle,
+                                {
+                                    backgroundColor: '#fff',
+                                    transform: [{
+                                        translateX: toggleAnim.interpolate({
+                                            inputRange: [0, 1],
+                                            outputRange: [0, 132] // 180 total width - 8 padding - 40 circle width = 132 travel
+                                        })
+                                    }]
+                                }
+                            ]} />
+                        </View>
                     </TouchableOpacity>
                 </View>
 
@@ -310,8 +355,7 @@ export default function RiderDashboard() {
                         <StatCard
                             title="Insights"
                             subtitle="View Analytics"
-                            value="Performance"
-                            badgeValue="STATS"
+                            value="Analytics"
                             onPress={() => router.push('/rider/analytics')}
                             cardBg={cardBg}
                             textColor={textColor}
@@ -321,7 +365,6 @@ export default function RiderDashboard() {
                             title="Activity"
                             subtitle="Total Earnings today"
                             value={todaysEarnings.toLocaleString(undefined, { minimumFractionDigits: 2 })}
-                            badgeValue="+20%"
                             isCurrency
                             onPress={() => router.push('/rider/wallet')}
                             cardBg={cardBg}
@@ -332,7 +375,7 @@ export default function RiderDashboard() {
                             title="Activity"
                             subtitle="Total delivery today"
                             value={todaysTrips.toString()}
-                            badgeValue="+5"
+                            onPress={() => router.push('/rider/deliveries?tab=history')}
                             cardBg={cardBg}
                             textColor={textColor}
                         />
@@ -461,10 +504,32 @@ const styles = StyleSheet.create({
     toggleContainer: { paddingHorizontal: 26, marginBottom: 30 },
     onlineButton: {
         flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
-        paddingHorizontal: 8, paddingVertical: 4, width: 180, height: 50, borderRadius: 50,
+        paddingHorizontal: 4, paddingVertical: 4, width: 180, height: 50, borderRadius: 50,
+        position: 'relative'
     },
-    onlineButtonText: { fontFamily: 'OpenSans_600SemiBold', fontSize: 16, marginLeft: 16 },
-    toggleCircle: { width: 40, height: 40, borderRadius: 20 },
+    onlineButtonText: {
+        fontFamily: 'OpenSans_600SemiBold',
+        fontSize: 14,
+        position: 'absolute',
+        width: '100%',
+        textAlign: 'center',
+        zIndex: 1
+    },
+    toggleTrack: {
+        width: '100%',
+        height: '100%',
+        justifyContent: 'center',
+    },
+    toggleCircle: {
+        width: 42,
+        height: 42,
+        borderRadius: 21,
+        shadowColor: "#000",
+        shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 0.2,
+        shadowRadius: 2.5,
+        elevation: 4
+    },
 
     // Stats
     statsContainer: { marginBottom: 30 },
