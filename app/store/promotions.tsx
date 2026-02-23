@@ -20,7 +20,7 @@ export default function PromotionsScreen() {
     }, []);
 
     if (loading) {
-        return <FoodLoader message="Loading promotions..." />;
+        return <FoodLoader message="Loading promotions..." type="store" />;
     }
 
     return (

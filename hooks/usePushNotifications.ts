@@ -41,12 +41,17 @@ async function registerForPushNotificationsAsync() {
             if (!projectId) {
                 // console.log('Project ID not found');
             }
-            token = (await Notifications.getExpoPushTokenAsync({
+            const tokenResponse = await Notifications.getExpoPushTokenAsync({
                 projectId,
-            })).data;
+            });
+            token = tokenResponse.data;
             console.log('Push Token:', token);
-        } catch (e) {
-            console.log('Error fetching push token:', e);
+        } catch (e: any) {
+            if (e.message?.includes('FirebaseApp is not initialized')) {
+                console.log('Push Notifications: Firebase not initialized. Skipping token fetch.');
+            } else {
+                console.log('Error fetching push token:', e);
+            }
         }
     } else {
         console.log('Must use physical device for Push Notifications');

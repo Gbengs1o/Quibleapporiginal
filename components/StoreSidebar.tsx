@@ -12,14 +12,14 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { ThemedText } from './themed-text';
 import { ThemedView } from './themed-view';
 
-interface RestaurantProfile {
+interface StoreProfile {
     id: string;
     owner_id: string;
     name: string;
     logo_url: string | null;
 }
 
-const RestaurantSidebar = (props: any) => {
+const StoreSidebar = (props: any) => {
     const router = useRouter();
     const pathname = usePathname();
     const { user } = useAuth();
@@ -29,10 +29,10 @@ const RestaurantSidebar = (props: any) => {
     const isDark = theme === 'dark';
     const buttonBg = useThemeColor({ light: '#f3f3f3', dark: '#2c2c2e' }, 'background');
     const buttonText = useThemeColor({ light: '#000', dark: '#fff' }, 'text');
-    const iconActiveColor = '#f27c22';
+    const iconActiveColor = '#f27c22'; // Store color
     const iconInactiveColor = useThemeColor({ light: '#1f2050', dark: '#aaa' }, 'text');
 
-    const [restaurant, setRestaurant] = useState<RestaurantProfile | null>(null);
+    const [store, setStore] = useState<StoreProfile | null>(null);
     const [loading, setLoading] = useState(true);
     const [imageError, setImageError] = useState(false);
     const [pendingOrderCount, setPendingOrderCount] = useState(0);
@@ -61,26 +61,25 @@ const RestaurantSidebar = (props: any) => {
 
     useEffect(() => {
         if (user?.id) {
-            fetchRestaurantProfile();
+            fetchStoreProfile();
         }
     }, [user?.id]);
 
     useEffect(() => {
-        if (!restaurant?.id) return;
+        if (!store?.id) return;
 
-        // Fetch initial pending order count
         fetchPendingOrders();
         fetchUnreadMessages();
         fetchUnreadReviews();
 
         // Subscribe to new orders
         const subscription = supabase
-            .channel('restaurant-orders-sidebar')
+            .channel('store-orders-sidebar')
             .on('postgres_changes', {
                 event: 'INSERT',
                 schema: 'public',
                 table: 'orders',
-                filter: `restaurant_id=eq.${restaurant.id}`
+                filter: `store_id=eq.${store.id}`
             }, () => {
                 fetchPendingOrders();
             })
@@ -88,7 +87,7 @@ const RestaurantSidebar = (props: any) => {
                 event: 'UPDATE',
                 schema: 'public',
                 table: 'orders',
-                filter: `restaurant_id=eq.${restaurant.id}`
+                filter: `store_id=eq.${store.id}`
             }, () => {
                 fetchPendingOrders();
             })
@@ -96,7 +95,7 @@ const RestaurantSidebar = (props: any) => {
 
         // Subscribe to new chat messages
         const chatSub = supabase
-            .channel('restaurant-messages-sidebar')
+            .channel('store-messages-sidebar')
             .on('postgres_changes', {
                 event: 'INSERT',
                 schema: 'public',
@@ -115,12 +114,12 @@ const RestaurantSidebar = (props: any) => {
 
         // Subscribe to new reviews
         const reviewSub = supabase
-            .channel('restaurant-reviews-sidebar')
+            .channel('store-reviews-sidebar')
             .on('postgres_changes', {
                 event: '*',
                 schema: 'public',
                 table: 'food_order_reviews',
-                filter: `restaurant_id=eq.${restaurant.id}`
+                filter: `store_id=eq.${store.id}`
             }, () => {
                 fetchUnreadReviews();
             })
@@ -131,15 +130,15 @@ const RestaurantSidebar = (props: any) => {
             supabase.removeChannel(chatSub);
             supabase.removeChannel(reviewSub);
         };
-    }, [restaurant?.id]);
+    }, [store?.id]);
 
     const fetchPendingOrders = async () => {
-        if (!restaurant?.id) return;
+        if (!store?.id) return;
 
         const { data, error } = await supabase
             .from('orders')
-            .select('id', { count: 'exact' })
-            .eq('restaurant_id', restaurant.id)
+            .select('id')
+            .eq('store_id', store.id)
             .in('status', ['received', 'preparing']);
 
         if (!error && data) {
@@ -148,13 +147,12 @@ const RestaurantSidebar = (props: any) => {
     };
 
     const fetchUnreadMessages = async () => {
-        if (!restaurant?.id || !user?.id) return;
+        if (!store?.id || !user?.id) return;
 
-        // Get all order chats for this restaurant
         const { data: chats } = await supabase
             .from('order_chats')
             .select('id')
-            .eq('restaurant_id', restaurant.id);
+            .eq('store_id', store.id);
 
         if (!chats || chats.length === 0) {
             setUnreadMessageCount(0);
@@ -164,7 +162,7 @@ const RestaurantSidebar = (props: any) => {
         const chatIds = chats.map(c => c.id);
         const { data: unread, error } = await supabase
             .from('order_chat_messages')
-            .select('id', { count: 'exact' })
+            .select('id')
             .in('chat_id', chatIds)
             .eq('is_read', false)
             .neq('sender_id', user.id);
@@ -175,12 +173,12 @@ const RestaurantSidebar = (props: any) => {
     };
 
     const fetchUnreadReviews = async () => {
-        if (!restaurant?.id) return;
+        if (!store?.id) return;
 
         const { count, error } = await supabase
             .from('food_order_reviews')
             .select('*', { count: 'exact', head: true })
-            .eq('restaurant_id', restaurant.id)
+            .eq('store_id', store.id)
             .eq('is_viewed', false);
 
         if (!error && count !== null) {
@@ -188,22 +186,22 @@ const RestaurantSidebar = (props: any) => {
         }
     };
 
-    const fetchRestaurantProfile = async () => {
+    const fetchStoreProfile = async () => {
         try {
             setLoading(true);
             const { data, error } = await supabase
-                .from('restaurants')
+                .from('stores')
                 .select('id, owner_id, name, logo_url')
                 .eq('owner_id', user?.id)
                 .maybeSingle();
 
             if (error) {
-                console.error('Error fetching restaurant profile:', error);
+                console.error('Error fetching store profile:', error);
                 return;
             }
 
             if (data) {
-                setRestaurant(data);
+                setStore(data);
             }
         } catch (err) {
             console.error('Unexpected error:', err);
@@ -213,14 +211,15 @@ const RestaurantSidebar = (props: any) => {
     };
 
     const menuItems = [
-        { name: 'Dashboard', icon: 'home', type: 'Ionicons', route: '/restaurant/dashboard' },
-        { name: 'Orders', icon: 'clipboard-list', type: 'FontAwesome5', route: '/restaurant/orders', hasBadge: true },
-        { name: 'Menu Management', icon: 'restaurant-menu', type: 'MaterialIcons', route: '/restaurant/menu' },
-        { name: 'Promotions', icon: 'pricetag', type: 'Ionicons', route: '/restaurant/promotions' },
-        { name: 'Reviews', icon: 'star', type: 'Ionicons', route: '/restaurant/reviews', hasReviewBadge: true },
-        { name: 'Messages', icon: 'chatbubble-ellipses', type: 'Ionicons', route: '/restaurant/messages', hasMessageBadge: true },
-        { name: 'Profile & Settings', icon: 'person', type: 'Ionicons', route: '/restaurant/settings' },
-        { name: 'Analytics', icon: 'bar-chart', type: 'Ionicons', route: '/restaurant/analytics' },
+        { name: 'Dashboard', icon: 'home', type: 'Ionicons', route: '/store/dashboard' },
+        { name: 'Orders', icon: 'clipboard-list', type: 'FontAwesome5', route: '/store/orders', hasBadge: true },
+        { name: 'Inventory Management', icon: 'storefront', type: 'MaterialIcons', route: '/store/menu' },
+        { name: 'Wallet', icon: 'wallet', type: 'Ionicons', route: '/store/wallet' },
+        { name: 'Promotions', icon: 'pricetag', type: 'Ionicons', route: '/store/promotions' },
+        { name: 'Reviews', icon: 'star', type: 'Ionicons', route: '/store/reviews', hasReviewBadge: true },
+        { name: 'Messages', icon: 'chatbubble-ellipses', type: 'Ionicons', route: '/store/messages', hasMessageBadge: true },
+        { name: 'Store Profile', icon: 'person', type: 'Ionicons', route: '/store/settings' },
+        { name: 'Analytics', icon: 'bar-chart', type: 'Ionicons', route: '/store/analytics' },
     ];
 
     const handleNavigate = (route: string) => {
@@ -228,7 +227,7 @@ const RestaurantSidebar = (props: any) => {
         router.push(route);
     };
 
-    const renderIcon = (item: typeof menuItems[0], isActive: boolean) => {
+    const renderIcon = (item: any, isActive: boolean) => {
         const color = isActive ? iconActiveColor : iconInactiveColor;
         if (item.type === 'Ionicons') return <Ionicons name={item.icon as any} size={24} color={color} />;
         if (item.type === 'MaterialIcons') return <MaterialIcons name={item.icon as any} size={24} color={color} />;
@@ -240,40 +239,38 @@ const RestaurantSidebar = (props: any) => {
         <ThemedView style={styles.container}>
             <SafeAreaView style={{ flex: 1 }} edges={['top', 'bottom']}>
                 <ScrollView contentContainerStyle={styles.scrollContent}>
-                    {/* Profile Section */}
                     <View style={styles.profileSection}>
                         <View style={styles.avatarContainer}>
                             {loading ? (
-                                <View style={styles.avatarPlaceholder}>
+                                <View style={[styles.avatarPlaceholder, { backgroundColor: iconActiveColor }]}>
                                     <ActivityIndicator size="small" color="#fff" />
                                 </View>
-                            ) : restaurant?.logo_url && !imageError ? (
+                            ) : store?.logo_url && !imageError ? (
                                 <Image
-                                    source={{ uri: restaurant.logo_url }}
+                                    source={{ uri: store.logo_url }}
                                     style={styles.avatarImage}
                                     onError={() => setImageError(true)}
                                 />
                             ) : (
-                                <View style={styles.avatarPlaceholder}>
+                                <View style={[styles.avatarPlaceholder, { backgroundColor: iconActiveColor }]}>
                                     <ThemedText style={styles.avatarText}>
-                                        {restaurant?.name?.[0]?.toUpperCase() || 'R'}
+                                        {store?.name?.[0]?.toUpperCase() || 'S'}
                                     </ThemedText>
                                 </View>
                             )}
                         </View>
                         <View style={styles.profileInfo}>
                             <ThemedText style={styles.userName}>
-                                {restaurant?.name || 'Loading...'}
+                                {store?.name || 'Loading...'}
                             </ThemedText>
                             <ThemedText style={styles.restaurantName}>
-                                {loading ? 'Loading...' : 'Restaurant Dashboard'}
+                                {loading ? 'Loading...' : 'Store Dashboard'}
                             </ThemedText>
                         </View>
                     </View>
 
                     <View style={[styles.divider, { backgroundColor: isDark ? '#333' : 'rgba(0,0,0,0.1)' }]} />
 
-                    {/* Menu Items */}
                     <View style={styles.menuContainer}>
                         {menuItems.map((item, index) => {
                             const isActive = pathname === item.route || pathname.startsWith(item.route + '/');
@@ -289,11 +286,10 @@ const RestaurantSidebar = (props: any) => {
                                     <View style={styles.iconContainer}>
                                         {renderIcon(item, isActive)}
                                     </View>
-                                    <ThemedText style={[styles.menuText, isActive && styles.activeMenuText]}>
+                                    <ThemedText style={[styles.menuText, isActive && [styles.activeMenuText, { color: iconActiveColor }]]}>
                                         {item.name}
                                     </ThemedText>
 
-                                    {/* Order Badge */}
                                     {item.hasBadge && pendingOrderCount > 0 && (
                                         <Animated.View style={[styles.orderBadge, badgeAnimatedStyle]}>
                                             <ThemedText style={styles.orderBadgeText}>
@@ -302,16 +298,14 @@ const RestaurantSidebar = (props: any) => {
                                         </Animated.View>
                                     )}
 
-                                    {/* Message Badge */}
                                     {item.hasMessageBadge && unreadMessageCount > 0 && (
-                                        <Animated.View style={[styles.orderBadge, { backgroundColor: '#F27C22' }, badgeAnimatedStyle]}>
+                                        <Animated.View style={[styles.orderBadge, { backgroundColor: iconActiveColor }, badgeAnimatedStyle]}>
                                             <ThemedText style={styles.orderBadgeText}>
                                                 {unreadMessageCount > 9 ? '9+' : unreadMessageCount}
                                             </ThemedText>
                                         </Animated.View>
                                     )}
 
-                                    {/* Review Badge */}
                                     {item.hasReviewBadge && unreadReviewCount > 0 && (
                                         <Animated.View style={[styles.orderBadge, { backgroundColor: '#FFD700' }, badgeAnimatedStyle]}>
                                             <ThemedText style={[styles.orderBadgeText, { color: '#000' }]}>
@@ -326,13 +320,12 @@ const RestaurantSidebar = (props: any) => {
 
                     <View style={[styles.divider, { backgroundColor: isDark ? '#333' : 'rgba(0,0,0,0.1)' }]} />
 
-                    {/* Theme Toggle */}
                     <View style={styles.themeToggleContainer}>
                         <View style={styles.themeToggleContent}>
                             <Ionicons
                                 name={theme === 'dark' ? 'moon' : 'sunny'}
                                 size={20}
-                                color={theme === 'dark' ? '#f27c22' : '#1f2050'}
+                                color={theme === 'dark' ? iconActiveColor : '#1f2050'}
                             />
                             <ThemedText style={styles.themeToggleText}>
                                 {theme === 'dark' ? 'Dark Mode' : 'Light Mode'}
@@ -341,146 +334,55 @@ const RestaurantSidebar = (props: any) => {
                         <Switch
                             value={theme === 'dark'}
                             onValueChange={toggleTheme}
-                            trackColor={{ false: '#ccc', true: '#f27c22' }}
+                            trackColor={{ false: '#ccc', true: iconActiveColor }}
                             thumbColor={theme === 'dark' ? '#fff' : '#f4f4f4'}
                         />
                     </View>
 
                     <View style={[styles.divider, { backgroundColor: isDark ? '#333' : 'rgba(0,0,0,0.1)' }]} />
 
-                    {/* Go to Marketplace */}
                     <TouchableOpacity
                         style={[styles.marketplaceButton, { backgroundColor: buttonBg }]}
                         onPress={() => router.replace('/')}
                     >
                         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5 }}>
                             <ThemedText style={[styles.marketplaceText, { color: buttonText }]}>Go to</ThemedText>
-                            <ThemedText style={[styles.marketplaceText, { color: '#f27c22', fontWeight: 'bold' }]}>QUIBLE</ThemedText>
+                            <ThemedText style={[styles.marketplaceText, { color: iconActiveColor, fontWeight: 'bold' }]}>QUIBLE</ThemedText>
                             <ThemedText style={[styles.marketplaceText, { color: buttonText }]}>Marketplace</ThemedText>
                         </View>
                     </TouchableOpacity>
 
                 </ScrollView>
             </SafeAreaView>
-        </ThemedView>
+        </ThemedView >
     );
 };
 
 const styles = StyleSheet.create({
-    container: {
-        flex: 1,
-    },
-    scrollContent: {
-        paddingHorizontal: 20,
-        paddingBottom: 20,
-    },
-    profileSection: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        marginBottom: 30,
-    },
-    avatarContainer: {
-        marginRight: 15,
-    },
-    avatarPlaceholder: {
-        width: 50,
-        height: 50,
-        borderRadius: 25,
-        backgroundColor: '#f27c22',
-        justifyContent: 'center',
-        alignItems: 'center',
-    },
-    avatarImage: {
-        width: 50,
-        height: 50,
-        borderRadius: 25,
-        backgroundColor: '#f0f0f0',
-    },
-    avatarText: {
-        color: '#fff',
-        fontSize: 24,
-        fontWeight: 'bold',
-    },
-    profileInfo: {
-        flex: 1,
-    },
-    userName: {
-        fontSize: 18,
-        fontWeight: 'bold',
-    },
-    restaurantName: {
-        fontSize: 14,
-        opacity: 0.7,
-    },
-    divider: {
-        height: 1,
-        marginVertical: 20,
-    },
-    menuContainer: {
-        gap: 8,
-    },
-    menuItem: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        paddingVertical: 12,
-        paddingHorizontal: 12,
-        borderRadius: 12,
-    },
-    activeMenuItem: {
-        borderRadius: 12,
-    },
-    iconContainer: {
-        width: 32,
-        alignItems: 'center',
-        marginRight: 14,
-    },
-    menuText: {
-        fontSize: 15,
-        fontWeight: '500',
-        flex: 1,
-    },
-    activeMenuText: {
-        color: '#f27c22',
-        fontWeight: 'bold',
-    },
-    orderBadge: {
-        backgroundColor: '#ef4444',
-        minWidth: 22,
-        height: 22,
-        borderRadius: 11,
-        justifyContent: 'center',
-        alignItems: 'center',
-        paddingHorizontal: 6,
-    },
-    orderBadgeText: {
-        color: '#fff',
-        fontSize: 12,
-        fontWeight: 'bold',
-    },
-    marketplaceButton: {
-        marginTop: 20,
-        padding: 15,
-        borderRadius: 10,
-        alignItems: 'center'
-    },
-    marketplaceText: {
-        fontWeight: 'bold'
-    },
-    themeToggleContainer: {
-        flexDirection: 'row',
-        justifyContent: 'space-between',
-        alignItems: 'center',
-        paddingVertical: 15,
-    },
-    themeToggleContent: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        gap: 10,
-    },
-    themeToggleText: {
-        fontSize: 16,
-        fontWeight: '500',
-    },
+    container: { flex: 1 },
+    scrollContent: { paddingHorizontal: 20, paddingBottom: 20 },
+    profileSection: { flexDirection: 'row', alignItems: 'center', marginBottom: 30 },
+    avatarContainer: { marginRight: 15 },
+    avatarPlaceholder: { width: 50, height: 50, borderRadius: 25, justifyContent: 'center', alignItems: 'center' },
+    avatarImage: { width: 50, height: 50, borderRadius: 25, backgroundColor: '#f0f0f0' },
+    avatarText: { color: '#fff', fontSize: 24, fontWeight: 'bold' },
+    profileInfo: { flex: 1 },
+    userName: { fontSize: 18, fontWeight: 'bold' },
+    restaurantName: { fontSize: 14, opacity: 0.7 },
+    divider: { height: 1, marginVertical: 20 },
+    menuContainer: { gap: 8 },
+    menuItem: { flexDirection: 'row', alignItems: 'center', paddingVertical: 12, paddingHorizontal: 12, borderRadius: 12 },
+    activeMenuItem: { borderRadius: 12 },
+    iconContainer: { width: 32, alignItems: 'center', marginRight: 14 },
+    menuText: { fontSize: 15, fontWeight: '500', flex: 1 },
+    activeMenuText: { fontWeight: 'bold' },
+    orderBadge: { backgroundColor: '#ef4444', minWidth: 22, height: 22, borderRadius: 11, justifyContent: 'center', alignItems: 'center', paddingHorizontal: 6 },
+    orderBadgeText: { color: '#fff', fontSize: 12, fontWeight: 'bold' },
+    marketplaceButton: { marginTop: 20, padding: 15, borderRadius: 10, alignItems: 'center' },
+    marketplaceText: { fontWeight: 'bold' },
+    themeToggleContainer: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: 15 },
+    themeToggleContent: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+    themeToggleText: { fontSize: 16, fontWeight: '500' },
 });
 
-export default RestaurantSidebar;
+export default StoreSidebar;

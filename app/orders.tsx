@@ -92,14 +92,23 @@ export default function OrdersScreen() {
             return;
         }
 
-        // Get unique restaurants
-        const restaurants = Array.from(new Set(items.map(i => i.restaurant.id)))
-            .map(id => items.find(i => i.restaurant.id === id)!.restaurant);
+        // Get unique vendors (restaurants and stores)
+        const restaurants = Array.from(new Set(items.filter(i => i.type === 'food').map(i => i.restaurant?.id)))
+            .map(id => items.find(i => i.restaurant?.id === id)!.restaurant!);
+
+        const stores = Array.from(new Set(items.filter(i => i.type === 'store').map(i => i.store?.id)))
+            .map(id => items.find(i => i.store?.id === id)!.store!);
 
         let totalFee = 0;
         restaurants.forEach(rest => {
             const dist = calculateDistance(userLocation.latitude, userLocation.longitude, rest.latitude, rest.longitude);
             const fee = feeConfig.food_base_fee + (dist * feeConfig.food_per_km_rate);
+            totalFee += fee;
+        });
+
+        stores.forEach(store => {
+            const dist = calculateDistance(userLocation.latitude, userLocation.longitude, store.latitude, store.longitude);
+            const fee = feeConfig.food_base_fee + (dist * feeConfig.food_per_km_rate); // Use same rates for now
             totalFee += fee;
         });
 
@@ -125,18 +134,19 @@ export default function OrdersScreen() {
     const handleCheckout = async () => {
         if (items.length === 0) return;
 
-        // NEW: Check if restaurants are open
-        const uniqueRestaurantIds = Array.from(new Set(items.map(i => i.restaurant.id)));
+        // NEW: Check if restaurants and stores are open
+        const uniqueRestaurantIds = Array.from(new Set(items.filter(i => i.type === 'food').map(i => i.restaurant?.id)));
+        const uniqueStoreIds = Array.from(new Set(items.filter(i => i.type === 'store').map(i => i.store?.id)));
 
         try {
-            const { data: restaurants, error } = await supabase
-                .from('restaurants')
-                .select('id, name, is_open')
-                .in('id', uniqueRestaurantIds);
+            if (uniqueRestaurantIds.length > 0) {
+                const { data: restaurants } = await supabase
+                    .from('restaurants')
+                    .select('id, name, is_open')
+                    .in('id', uniqueRestaurantIds);
 
-            if (restaurants) {
-                const closedRestaurant = restaurants.find(r => r.is_open === false);
-                if (closedRestaurant) {
+                if (restaurants) {
+                    const closedRestaurant = restaurants.find(r => r.is_open === false);
                     if (closedRestaurant) {
                         setClosedRestaurantName(closedRestaurant.name);
                         setShowClosedModal(true);
@@ -144,9 +154,24 @@ export default function OrdersScreen() {
                     }
                 }
             }
+
+            if (uniqueStoreIds.length > 0) {
+                const { data: stores } = await supabase
+                    .from('stores')
+                    .select('id, name, is_open')
+                    .in('id', uniqueStoreIds);
+
+                if (stores) {
+                    const closedStore = stores.find(s => s.is_open === false);
+                    if (closedStore) {
+                        setClosedRestaurantName(closedStore.name); // Reusing state for now
+                        setShowClosedModal(true);
+                        return;
+                    }
+                }
+            }
         } catch (err) {
-            console.error("Error checking restaurant status", err);
-            // Optional: fail open or closed? Let's proceed if check fails to avoid blocking due to network.
+            console.error("Error checking vendor status", err);
         }
 
         if (!session) {
@@ -245,7 +270,7 @@ export default function OrdersScreen() {
         }
     };
 
-    const { placeOrder } = useOrders(); // Destructure placeOrder
+    const { placeOrder, placeStoreOrder } = useOrders();
 
     const processWalletPayment = async () => {
         if (!activeWallet) {
@@ -273,15 +298,15 @@ export default function OrdersScreen() {
         setIsPaying(true);
         try {
             // Group items by restaurant
-            const ordersByRestaurant = items.reduce((acc, item) => {
-                const rId = item.restaurant.id;
+            const ordersByRestaurant = items.filter(i => i.type === 'food').reduce((acc, item) => {
+                const rId = item.restaurant?.id || '';
                 if (!acc[rId]) {
                     acc[rId] = { restaurantId: rId, amount: 0, items: [] };
                 }
                 const itemTotal = item.price * item.quantity;
                 acc[rId].amount += itemTotal;
                 acc[rId].items.push({
-                    menu_item_id: item.dishId, // Use dishId (UUID) not item.id (Composite)
+                    menu_item_id: item.itemId,
                     quantity: item.quantity,
                     price: item.price,
                     options: ''
@@ -289,13 +314,29 @@ export default function OrdersScreen() {
                 return acc;
             }, {} as Record<string, { restaurantId: string, amount: number, items: any[] }>);
 
+            // Group items by store
+            const ordersByStore = items.filter(i => i.type === 'store').reduce((acc, item) => {
+                const sId = item.store?.id || '';
+                if (!acc[sId]) {
+                    acc[sId] = { storeId: sId, amount: 0, items: [] };
+                }
+                const itemTotal = item.price * item.quantity;
+                acc[sId].amount += itemTotal;
+                acc[sId].items.push({
+                    store_item_id: item.itemId,
+                    quantity: item.quantity,
+                    price: item.price,
+                    options: ''
+                });
+                return acc;
+            }, {} as Record<string, { storeId: string, amount: number, items: any[] }>);
+
             // Process each restaurant order
             for (const rId in ordersByRestaurant) {
                 const order = ordersByRestaurant[rId];
-                // Calculate delivery fee for THIS specific restaurant if in delivery mode
                 let restaurantDeliveryFee = 0;
                 if (isDelivery && userLocation) {
-                    const rest = items.find(i => i.restaurant.id === rId)?.restaurant;
+                    const rest = items.find(i => i.restaurant?.id === rId)?.restaurant;
                     if (rest) {
                         const dist = calculateDistance(userLocation.latitude, userLocation.longitude, rest.latitude, rest.longitude);
                         restaurantDeliveryFee = feeConfig.food_base_fee + (dist * feeConfig.food_per_km_rate);
@@ -305,7 +346,7 @@ export default function OrdersScreen() {
                 // Calculate total with service fee and delivery fee for THIS order
                 const orderTotal = order.amount + (order.amount * 0.10) + restaurantDeliveryFee;
 
-                const rest = items.find(i => i.restaurant.id === rId)?.restaurant;
+                const rest = items.find(i => i.restaurant?.id === rId)?.restaurant;
                 const locationData = {
                     pickup_lat: rest?.latitude,
                     pickup_lng: rest?.longitude,
@@ -314,6 +355,31 @@ export default function OrdersScreen() {
                 };
 
                 await placeOrder(rId, orderTotal, order.items, locationData);
+            }
+
+            // Process each store order
+            for (const sId in ordersByStore) {
+                const order = ordersByStore[sId];
+                let storeDeliveryFee = 0;
+                if (isDelivery && userLocation) {
+                    const store = items.find(i => i.store?.id === sId)?.store;
+                    if (store) {
+                        const dist = calculateDistance(userLocation.latitude, userLocation.longitude, store.latitude, store.longitude);
+                        storeDeliveryFee = feeConfig.food_base_fee + (dist * feeConfig.food_per_km_rate);
+                    }
+                }
+
+                const orderTotal = order.amount + (order.amount * 0.10) + storeDeliveryFee;
+
+                const store = items.find(i => i.store?.id === sId)?.store;
+                const locationData = {
+                    pickup_lat: store?.latitude,
+                    pickup_lng: store?.longitude,
+                    dropoff_lat: isDelivery ? userLocation?.latitude : undefined,
+                    dropoff_lng: isDelivery ? userLocation?.longitude : undefined
+                };
+
+                await placeStoreOrder(sId, orderTotal, order.items, locationData);
             }
 
             setPaymentStatus('success');
@@ -354,7 +420,7 @@ export default function OrdersScreen() {
                     {item.name}
                 </ThemedText>
                 <ThemedText style={[styles.restaurantName, { color: secondaryText }]} numberOfLines={1}>
-                    {item.restaurant.name}
+                    {item.type === 'food' ? item.restaurant?.name : item.store?.name}
                 </ThemedText>
                 <ThemedText style={styles.itemPrice}>
                     ₦{item.price.toLocaleString()}

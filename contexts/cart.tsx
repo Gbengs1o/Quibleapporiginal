@@ -4,13 +4,21 @@ import React, { createContext, useContext, useEffect, useState } from 'react';
 
 export interface CartItem {
     id: string;
-    dishId: string;
+    itemId: string;
+    type: 'food' | 'store';
     name: string;
     description: string;
     price: number;
     quantity: number;
     image_url: string | null;
-    restaurant: {
+    restaurant?: {
+        id: string;
+        name: string;
+        logo_url: string | null;
+        latitude: number;
+        longitude: number;
+    };
+    store?: {
         id: string;
         name: string;
         logo_url: string | null;
@@ -23,12 +31,12 @@ interface CartContextType {
     items: CartItem[];
     addToCart: (item: Omit<CartItem, 'id' | 'quantity'>) => void;
     removeFromCart: (id: string) => void;
-    removeByDishId: (dishId: string) => void;
+    removeByItemId: (itemId: string) => void;
     updateQuantity: (id: string, quantity: number) => void;
     clearCart: () => void;
     getItemCount: () => number;
     getTotal: () => number;
-    isInCart: (dishId: string) => boolean;
+    isInCart: (itemId: string) => boolean;
 }
 
 const CartContext = createContext<CartContextType | undefined>(undefined);
@@ -83,8 +91,10 @@ export const CartProvider: React.FC<{ children: React.ReactNode }> = ({ children
             const stored = await AsyncStorage.getItem(CART_STORAGE_KEY);
             if (stored) {
                 const parsedItems = JSON.parse(stored);
-                // Self-healing: Remove items with missing dishId (from previous bug)
-                const validItems = parsedItems.filter((i: any) => i.dishId && i.restaurant);
+                // Self-healing: Remove items with missing itemId or required vendor info
+                const validItems = parsedItems.filter((i: any) =>
+                    i.itemId && (i.restaurant || i.store)
+                );
                 setItems(validItems);
             }
         } catch (error) {
@@ -101,19 +111,19 @@ export const CartProvider: React.FC<{ children: React.ReactNode }> = ({ children
     };
 
     const addToCart = (item: Omit<CartItem, 'id' | 'quantity'>) => {
-        const existingItem = items.find(i => i.dishId === item.dishId);
+        const existingItem = items.find(i => i.itemId === item.itemId);
 
         if (existingItem) {
             setItems(items.map(i =>
-                i.dishId === item.dishId
-                    ? { ...i, quantity: i.quantity + 1 }
+                i.itemId === item.itemId
+                    ? { ...i, quantity: i.quantity + (item.quantity || 1) }
                     : i
             ));
         } else {
             setItems([...items, {
                 ...item,
-                id: `${item.dishId}-${Date.now()}`,
-                quantity: 1,
+                id: `${item.itemId}-${Date.now()}`,
+                quantity: item.quantity || 1,
             }]);
         }
     };
@@ -122,8 +132,8 @@ export const CartProvider: React.FC<{ children: React.ReactNode }> = ({ children
         setItems(items.filter(item => item.id !== id));
     };
 
-    const removeByDishId = (dishId: string) => {
-        setItems(items.filter(item => item.dishId !== dishId));
+    const removeByItemId = (itemId: string) => {
+        setItems(items.filter(item => item.itemId !== itemId));
     };
 
     const updateQuantity = (id: string, quantity: number) => {
@@ -148,8 +158,8 @@ export const CartProvider: React.FC<{ children: React.ReactNode }> = ({ children
         return items.reduce((sum, item) => sum + (item.price * item.quantity), 0);
     };
 
-    const isInCart = (dishId: string) => {
-        return items.some(item => item.dishId === dishId);
+    const isInCart = (itemId: string) => {
+        return items.some(item => item.itemId === itemId);
     };
 
     return (
@@ -157,7 +167,7 @@ export const CartProvider: React.FC<{ children: React.ReactNode }> = ({ children
             items,
             addToCart,
             removeFromCart,
-            removeByDishId,
+            removeByItemId,
             updateQuantity,
             clearCart,
             getItemCount,

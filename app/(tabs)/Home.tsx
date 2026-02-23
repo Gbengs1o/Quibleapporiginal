@@ -1,9 +1,10 @@
-import DeliveryCard from '@/components/DeliveryCard';
 import HomeCategories, { PriceRange, RatingFilter, ServiceCategory, SortOption } from '@/components/HomeCategories';
+import HomeDiscovery from '@/components/HomeDiscovery';
 import HomeHeader from '@/components/HomeHeader';
 import LogoLoader from '@/components/LogoLoader';
 import NearbyDishes from '@/components/NearbyDishes';
 import NearbyRiders from '@/components/NearbyRiders';
+import NearbyStores from '@/components/NearbyStores';
 import SidePanel from '@/components/SidePanel';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
@@ -26,12 +27,14 @@ const HomeScreen = () => {
 
   // Food-specific filters
   const [dishCategoryFilter, setDishCategoryFilter] = useState<string | null>(null);
+  const [storeCategoryFilter, setStoreCategoryFilter] = useState<string | null>(null);
   const [sortBy, setSortBy] = useState<SortOption>('distance');
   const [priceRange, setPriceRange] = useState<PriceRange>('all');
   const [ratingFilter, setRatingFilter] = useState<RatingFilter>(0);
 
   const { getItemCount } = useCart();
   const router = useRouter();
+  const textColor = useThemeColor({ light: '#1f2050', dark: '#fff' }, 'text');
   const secondaryText = useThemeColor({ light: '#666', dark: '#888' }, 'text');
   const cartBadgeBg = useThemeColor({ light: '#ef4444', dark: '#ef4444' }, 'background');
 
@@ -81,94 +84,103 @@ const HomeScreen = () => {
   const cartItemCount = getItemCount();
 
   // Helper booleans
-  const showFood = selectedCategory === 'food' || selectedCategory === 'all';
-  const showDelivery = selectedCategory === 'delivery' || selectedCategory === 'all';
+  const showFood = selectedCategory === 'food';
+  const showDelivery = selectedCategory === 'delivery';
   const showHandy = selectedCategory === 'handy';
   const showStore = selectedCategory === 'store';
+  const showDiscovery = selectedCategory === 'all';
 
-  // --- 1. Extracted Header Content ---
-  // This contains everything that sits ABOVE the food list
-  const renderHeaderContent = () => (
-    <View>
-      <HomeCategories
-        selectedCategory={selectedCategory}
-        onCategoryChange={setSelectedCategory}
-        searchQuery={searchQuery}
-        onSearchChange={setSearchQuery}
-        dishCategoryFilter={dishCategoryFilter}
-        onDishCategoryChange={setDishCategoryFilter}
-        sortBy={sortBy}
-        onSortChange={setSortBy}
-        priceRange={priceRange}
-        onPriceRangeChange={setPriceRange}
-        ratingFilter={ratingFilter}
-        onRatingFilterChange={setRatingFilter}
-      />
-
-      {/* Dynamic Content */}
-
-
-      {showHandy && (
-        <View style={styles.comingSoon}>
-          <Ionicons name="construct" size={50} color={secondaryText} />
-          <ThemedText style={[styles.comingSoonTitle, { color: secondaryText }]}>
-            Handyman Services
-          </ThemedText>
-          <ThemedText style={[styles.comingSoonText, { color: secondaryText }]}>
-            Find skilled professionals near you
-          </ThemedText>
-          <ThemedText style={styles.comingSoonBadge}>Coming Soon</ThemedText>
-        </View>
-      )}
-
-      {showStore && (
-        <View style={styles.comingSoon}>
-          <Ionicons name="storefront" size={50} color={secondaryText} />
-          <ThemedText style={[styles.comingSoonTitle, { color: secondaryText }]}>
-            Nearby Stores
-          </ThemedText>
-          <ThemedText style={[styles.comingSoonText, { color: secondaryText }]}>
-            Shop from local stores around you
-          </ThemedText>
-          <ThemedText style={styles.comingSoonBadge}>Coming Soon</ThemedText>
-        </View>
-      )}
-
-      {showDelivery && selectedCategory === 'all' && <DeliveryCard />}
-    </View>
+  // --- 1. Static Header Content ---
+  const renderCategoriesHeader = () => (
+    <HomeCategories
+      selectedCategory={selectedCategory}
+      onCategoryChange={setSelectedCategory}
+      searchQuery={searchQuery}
+      onSearchChange={setSearchQuery}
+      dishCategoryFilter={dishCategoryFilter}
+      onDishCategoryChange={setDishCategoryFilter}
+      storeCategoryFilter={storeCategoryFilter}
+      onStoreCategoryChange={setStoreCategoryFilter}
+      sortBy={sortBy}
+      onSortChange={setSortBy}
+      priceRange={priceRange}
+      onPriceRangeChange={setPriceRange}
+      ratingFilter={ratingFilter}
+      onRatingFilterChange={setRatingFilter}
+    />
   );
 
   return (
     <ThemedView style={styles.container}>
       <HomeHeader onMenuPress={toggleSidePanel} profile={profile} />
 
-      {/* --- 2. Conditional Rendering to Fix Nesting Error --- */}
-      {showFood ? (
-        // Case A: Food is visible. NearbyDishes is the main scroll container.
+      {/* --- Main Content Section --- */}
+      {showDiscovery ? (
+        <ScrollView
+          showsVerticalScrollIndicator={false}
+          contentContainerStyle={styles.scrollContent}
+        >
+          {renderCategoriesHeader()}
+          <HomeDiscovery
+            searchQuery={searchQuery}
+            dishCategoryFilter={dishCategoryFilter}
+            storeCategoryFilter={storeCategoryFilter}
+            sortBy={sortBy}
+            priceRange={priceRange}
+            ratingFilter={ratingFilter}
+          />
+        </ScrollView>
+      ) : showFood ? (
         <NearbyDishes
           searchQuery={searchQuery}
           categoryFilter={dishCategoryFilter}
           sortBy={sortBy}
           priceRange={priceRange}
           ratingFilter={ratingFilter}
-          // Pass the header content here to scroll WITH the list
-          ListHeaderComponent={renderHeaderContent()}
           contentContainerStyle={styles.scrollContent}
+          ListHeaderComponent={<>{renderCategoriesHeader()}</>}
+          isShelf={false}
         />
-      ) : showDelivery && selectedCategory === 'delivery' ? (
-        // Case B: Delivery is visible. NearbyRiders is the main scroll container.
+      ) : showDelivery ? (
         <NearbyRiders
-          ListHeaderComponent={renderHeaderContent()}
           searchQuery={searchQuery}
+          ListHeaderComponent={<>{renderCategoriesHeader()}</>}
         />
+      ) : showStore ? (
+        <NearbyStores
+          searchQuery={searchQuery}
+          categoryFilter={storeCategoryFilter}
+          sortBy={sortBy}
+          priceRange={priceRange}
+          ratingFilter={ratingFilter}
+          contentContainerStyle={styles.scrollContent}
+          ListHeaderComponent={<>{renderCategoriesHeader()}</>}
+          isShelf={false}
+        />
+      ) : showHandy ? (
+        <ScrollView
+          showsVerticalScrollIndicator={false}
+          contentContainerStyle={styles.scrollContent}
+        >
+          {renderCategoriesHeader()}
+          <View style={styles.comingSoon}>
+            <Ionicons name="construct" size={50} color={secondaryText} />
+            <ThemedText style={[styles.comingSoonTitle, { color: secondaryText }]}>
+              Handyman Services
+            </ThemedText>
+            <ThemedText style={[styles.comingSoonText, { color: secondaryText }]}>
+              Find skilled professionals near you
+            </ThemedText>
+            <ThemedText style={styles.comingSoonBadge}>Coming Soon</ThemedText>
+          </View>
+        </ScrollView>
       ) : (
-        // Case C: Other (ScrollView)
         <ScrollView
           style={styles.scrollView}
           showsVerticalScrollIndicator={false}
           contentContainerStyle={styles.scrollContent}
         >
-          {renderHeaderContent()}
+          {/* Fallback */}
         </ScrollView>
       )}
 
@@ -206,6 +218,18 @@ const styles = StyleSheet.create({
   },
   scrollContent: {
     paddingBottom: 100,
+  },
+  headerRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingHorizontal: 20,
+    marginBottom: 10,
+    marginTop: 5,
+  },
+  sectionTitle: {
+    fontSize: 22,
+    fontWeight: '700',
   },
   comingSoonContainer: {
     flex: 1,

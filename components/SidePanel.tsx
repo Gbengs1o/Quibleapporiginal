@@ -46,16 +46,18 @@ const SidePanel: React.FC<SidePanelProps> = ({ isOpen, onClose, profile }) => {
   const { user, signOut } = useAuth();
 
   const [isAddServiceOpen, setAddServiceOpen] = useState(false);
-  const [restaurant, setRestaurant] = useState<{ id: string; name: string; logo_url: string | null } | null>(null);
+  const [restaurant, setRestaurant] = useState<{ id: string; name: string; logo_url: string | null; status: string } | null>(null);
+  const [store, setStore] = useState<{ id: string; name: string; logo_url: string | null; status: string } | null>(null);
   const [rider, setRider] = useState<{ id: string; status: string; rider_photo: string | null } | null>(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     if (user) {
       setLoading(true);
-      Promise.all([checkRestaurantStatus(), checkRiderStatus()]).finally(() => setLoading(false));
+      Promise.all([checkRestaurantStatus(), checkStoreStatus(), checkRiderStatus()]).finally(() => setLoading(false));
     } else {
       setRestaurant(null);
+      setStore(null);
       setRider(null);
       setLoading(false);
     }
@@ -78,12 +80,25 @@ const SidePanel: React.FC<SidePanelProps> = ({ isOpen, onClose, profile }) => {
     try {
       const { data } = await supabase
         .from('restaurants')
-        .select('id, name, logo_url')
+        .select('id, name, logo_url, status')
         .eq('owner_id', user?.id)
         .single();
       if (data) setRestaurant(data);
     } catch (error) {
       // No restaurant registered
+    }
+  };
+
+  const checkStoreStatus = async () => {
+    try {
+      const { data } = await supabase
+        .from('stores')
+        .select('id, name, logo_url, status')
+        .eq('owner_id', user?.id)
+        .single();
+      if (data) setStore(data);
+    } catch (error) {
+      // No store registered
     }
   };
 
@@ -98,9 +113,10 @@ const SidePanel: React.FC<SidePanelProps> = ({ isOpen, onClose, profile }) => {
     router.replace('/');
   };
 
-  const hasAnyBusiness = restaurant || rider;
+  const hasAnyBusiness = restaurant || rider || store;
   const registeredKeys = [
     ...(restaurant ? ['restaurant'] : []),
+    ...(store ? ['store'] : []),
     ...(rider ? ['rider'] : []),
   ];
   const availableToRegister = AVAILABLE_SERVICES.filter(s => !registeredKeys.includes(s.key));
@@ -197,8 +213,39 @@ const SidePanel: React.FC<SidePanelProps> = ({ isOpen, onClose, profile }) => {
                               )}
                             </View>
                             <View style={styles.businessInfo}>
-                              <ThemedText style={styles.businessName}>{restaurant.name}</ThemedText>
-                              <ThemedText style={[styles.businessType, { color: subtleText }]}>Restaurant</ThemedText>
+                              <ThemedText style={styles.businessName}>{restaurant.name || 'Your Restaurant'}</ThemedText>
+                              <View style={styles.statusBadge}>
+                                <View style={[styles.statusDot, { backgroundColor: restaurant.status === 'active' ? '#4CAF50' : restaurant.status === 'pending' ? '#F4821F' : '#F44336' }]} />
+                                <ThemedText style={[styles.businessType, { color: subtleText }]}>
+                                  {restaurant.status.charAt(0).toUpperCase() + restaurant.status.slice(1)}
+                                </ThemedText>
+                              </View>
+                            </View>
+                            <Ionicons name="chevron-forward" size={20} color={subtleText} />
+                          </TouchableOpacity>
+                        )}
+
+                        {/* Registered Store */}
+                        {store && (
+                          <TouchableOpacity
+                            style={[styles.businessCard, { backgroundColor: cardBg, borderColor }]}
+                            onPress={() => handleNavigate('/store/dashboard')}
+                          >
+                            <View style={[styles.businessIcon, { backgroundColor: '#F3E5F5' }]}>
+                              {store.logo_url ? (
+                                <Image source={{ uri: store.logo_url }} style={styles.businessLogo} />
+                              ) : (
+                                <Ionicons name="storefront" size={24} color="#9C27B0" />
+                              )}
+                            </View>
+                            <View style={styles.businessInfo}>
+                              <ThemedText style={styles.businessName}>{store.name || 'Your Store'}</ThemedText>
+                              <View style={styles.statusBadge}>
+                                <View style={[styles.statusDot, { backgroundColor: store.status === 'active' ? '#4CAF50' : store.status === 'pending' ? '#F4821F' : '#F44336' }]} />
+                                <ThemedText style={[styles.businessType, { color: subtleText }]}>
+                                  {store.status.charAt(0).toUpperCase() + store.status.slice(1)}
+                                </ThemedText>
+                              </View>
                             </View>
                             <Ionicons name="chevron-forward" size={20} color={subtleText} />
                           </TouchableOpacity>
@@ -218,11 +265,11 @@ const SidePanel: React.FC<SidePanelProps> = ({ isOpen, onClose, profile }) => {
                               )}
                             </View>
                             <View style={styles.businessInfo}>
-                              <ThemedText style={styles.businessName}>Rider Dashboard</ThemedText>
+                              <ThemedText style={styles.businessName}>Rider Profile</ThemedText>
                               <View style={styles.statusBadge}>
-                                <View style={[styles.statusDot, { backgroundColor: rider.status === 'active' ? '#4CAF50' : '#999' }]} />
+                                <View style={[styles.statusDot, { backgroundColor: rider.status === 'active' ? '#4CAF50' : rider.status === 'pending' ? '#F4821F' : '#F44336' }]} />
                                 <ThemedText style={[styles.businessType, { color: subtleText }]}>
-                                  {rider.status === 'active' ? 'Active' : 'Pending'}
+                                  {rider.status.charAt(0).toUpperCase() + rider.status.slice(1)}
                                 </ThemedText>
                               </View>
                             </View>

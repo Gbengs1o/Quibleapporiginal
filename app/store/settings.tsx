@@ -3,6 +3,7 @@ import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { useAuth } from '@/contexts/auth';
 import { useRestaurantMenu } from '@/contexts/restaurant-menu';
+import { useWallet } from '@/contexts/wallet';
 import { useThemeColor } from '@/hooks/use-theme-color';
 import { supabase } from '@/utils/supabase';
 import { Ionicons } from '@expo/vector-icons';
@@ -45,6 +46,11 @@ export default function SettingsScreen() {
     const navigation = useNavigation();
     const { openMenu } = useRestaurantMenu();
     const { user } = useAuth();
+    const { businessWallets } = useWallet();
+
+    // Find store wallet
+    const storeWallet = businessWallets.find(w => w.store?.owner_id === user?.id);
+
     const iconColor = useThemeColor({ light: '#1f2050', dark: '#fff' }, 'text');
     const [loading, setLoading] = useState(true);
     const [saving, setSaving] = useState(false);
@@ -294,7 +300,7 @@ export default function SettingsScreen() {
     };
 
     if (loading) {
-        return <FoodLoader message="Loading restaurant data..." />;
+        return <FoodLoader message="Loading store data..." type="store" />;
     }
 
     if (!store) {
@@ -419,6 +425,9 @@ export default function SettingsScreen() {
                         </View>
                         <View style={styles.walletTextContainer}>
                             <ThemedText style={styles.walletTitle}>Store Wallet</ThemedText>
+                            <ThemedText style={[styles.walletTitle, { color: '#f27c22', fontSize: 18 }]}>
+                                ₦{storeWallet?.balance.toLocaleString() || '0.00'}
+                            </ThemedText>
                             <ThemedText style={styles.walletSubtitle}>Manage funds, transfers, and payouts</ThemedText>
                         </View>
                         <Ionicons name="chevron-forward" size={20} color={iconColor} />

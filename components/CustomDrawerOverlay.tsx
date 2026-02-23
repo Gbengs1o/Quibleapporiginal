@@ -9,11 +9,16 @@ import {
     View
 } from 'react-native';
 import RestaurantSidebar from './RestaurantSidebar';
+import StoreSidebar from './StoreSidebar';
 
 const { width } = Dimensions.get('window');
 const DRAWER_WIDTH = width * 0.8;
 
-const CustomDrawerOverlay = () => {
+interface CustomDrawerOverlayProps {
+    type?: 'restaurant' | 'store';
+}
+
+const CustomDrawerOverlay = ({ type = 'restaurant' }: CustomDrawerOverlayProps) => {
     const { isOpen, closeMenu } = useRestaurantMenu();
     const slideAnim = useRef(new Animated.Value(-DRAWER_WIDTH)).current;
     const fadeAnim = useRef(new Animated.Value(0)).current;
@@ -48,11 +53,6 @@ const CustomDrawerOverlay = () => {
         }
     }, [isOpen]);
 
-    if (!isOpen) {
-        // We rely on the Modal's visible prop controlled by isOpen
-        // to handle the unmounting/hiding effectively.
-    }
-
     return (
         <Modal
             visible={isOpen}
@@ -74,7 +74,7 @@ const CustomDrawerOverlay = () => {
                         { transform: [{ translateX: slideAnim }] }
                     ]}
                 >
-                    <RestaurantSidebar />
+                    {type === 'store' ? <StoreSidebar /> : <RestaurantSidebar />}
                 </Animated.View>
             </View>
         </Modal>

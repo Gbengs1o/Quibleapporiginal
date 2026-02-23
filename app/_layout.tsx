@@ -168,6 +168,7 @@ function InitialLayout() {
       <Stack.Screen name="index" options={{ headerShown: false }} />
       <Stack.Screen name="onboarding" options={{ headerShown: false }} />
       <Stack.Screen name="restaurant" options={{ headerShown: false }} />
+      <Stack.Screen name="store" options={{ headerShown: false }} />
       <Stack.Screen name="rider" options={{ headerShown: false }} />
       <Stack.Screen name="send-package" options={{ headerShown: false }} />
       <Stack.Screen name="edit-profile" options={{ headerShown: false }} />

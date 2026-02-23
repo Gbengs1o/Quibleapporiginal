@@ -8,13 +8,19 @@ interface FoodLoaderProps {
     message?: string;
     size?: number;
     fullScreen?: boolean;
+    type?: 'restaurant' | 'store';
 }
 
-export default function FoodLoader({ message = "Loading...", size = 200, fullScreen = true }: FoodLoaderProps) {
+const ANIMATIONS = {
+    restaurant: 'https://lottie.host/32460ed7-5572-49d4-9b11-8096eee3437b/TzG7GfevAR.lottie',
+    store: 'https://lottie.host/cb2b36c4-f2d3-4d46-95cb-2840f8056cd3/xW3cOWzsY2.lottie'
+};
+
+export default function FoodLoader({ message = "Loading...", size = 200, fullScreen = true, type = 'restaurant' }: FoodLoaderProps) {
     const content = (
         <View style={styles.container}>
             <LottieView
-                source={{ uri: 'https://lottie.host/32460ed7-5572-49d4-9b11-8096eee3437b/TzG7GfevAR.lottie' }}
+                source={{ uri: ANIMATIONS[type] }}
                 style={{ width: size, height: size }}
                 autoPlay
                 loop

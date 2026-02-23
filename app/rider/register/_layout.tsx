@@ -10,8 +10,22 @@ export default function RiderRegisterLayout() {
     React.useEffect(() => {
         if (isReady && !session) {
             router.replace('/(auth)/login');
+        } else if (isReady && session) {
+            checkExistingRider();
         }
     }, [isReady, session]);
+
+    const checkExistingRider = async () => {
+        if (!session?.user?.id) return;
+        const { data } = await supabase
+            .from('riders')
+            .select('id, status')
+            .eq('user_id', session.user.id)
+            .single();
+        if (data) {
+            router.replace('/rider/(dashboard)');
+        }
+    };
 
     if (!isReady) {
         return null; // Or a loading spinner

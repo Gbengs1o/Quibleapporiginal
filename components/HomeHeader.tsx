@@ -162,13 +162,13 @@ const HomeHeader: React.FC<HomeHeaderProps> = ({ onMenuPress, profile }) => {
       </Modal>
       {/* SVG Curved Background */}
       <Svg
-        height="200"
+        height="160"
         width={width}
         style={styles.svgCurve}
-        viewBox={`0 0 ${width} 200`}
+        viewBox={`0 0 ${width} 160`}
       >
         <Path
-          d={`M 0 0 L 0 120 Q ${width / 2} 180 ${width} 120 L ${width} 0 Z`}
+          d={`M 0 0 L 0 100 Q ${width / 2} 150 ${width} 100 L ${width} 0 Z`}
           fill="#1F2051"
         />
       </Svg>
@@ -237,7 +237,7 @@ const HomeHeader: React.FC<HomeHeaderProps> = ({ onMenuPress, profile }) => {
 
 const styles = StyleSheet.create({
   wrapper: {
-    height: 200,
+    height: 160,
     width: '100%',
     position: 'relative',
     backgroundColor: 'transparent',
@@ -254,7 +254,7 @@ const styles = StyleSheet.create({
     alignItems: 'flex-start',
     justifyContent: 'space-between',
     paddingHorizontal: 20,
-    paddingTop: 60,
+    paddingTop: 50,
     zIndex: 10,
   },
   buttonContainer: {

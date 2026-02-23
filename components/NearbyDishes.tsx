@@ -29,10 +29,11 @@ interface NearbyDishesProps {
     sortBy?: string;
     ListHeaderComponent?: React.ComponentType<any> | React.ReactElement | null;
     contentContainerStyle?: ViewStyle;
+    isShelf?: boolean;
 }
 
 // --- Dish Card ---
-const DishCard = memo(({ item, onAdd, inCart, themeColors }: any) => {
+const DishCard = memo(({ item, onAdd, inCart, themeColors, isGrid = false }: any) => {
     const formatDistance = (km: number) => km < 1 ? `${Math.round(km * 1000)}m` : `${km.toFixed(1)}km`;
 
     const isSoldOut = !item.is_active;
@@ -49,6 +50,7 @@ const DishCard = memo(({ item, onAdd, inCart, themeColors }: any) => {
             onPress={handlePress}
             style={[
                 styles.dishCard,
+                isGrid && styles.dishCardGrid,
                 { backgroundColor: themeColors.cardBg, borderColor: themeColors.borderColor },
                 isSoldOut && styles.dishCardDisabled
             ]}
@@ -73,7 +75,10 @@ const DishCard = memo(({ item, onAdd, inCart, themeColors }: any) => {
 
             {/* Content Area */}
             <View style={styles.contentContainer}>
-                <View style={styles.restaurantRow}>
+                <TouchableOpacity
+                    style={styles.restaurantRow}
+                    onPress={() => item.restaurant?.id && router.push(`/restaurant-profile/${item.restaurant.id}`)}
+                >
                     {/* LOGO ADDITION */}
                     {item.restaurant?.logo_url ? (
                         <Image source={{ uri: item.restaurant.logo_url }} style={styles.restaurantLogo} />
@@ -91,7 +96,7 @@ const DishCard = memo(({ item, onAdd, inCart, themeColors }: any) => {
                             <ThemedText style={styles.ratingText}>{item.rating} ({item.review_count})</ThemedText>
                         </View>
                     )}
-                </View>
+                </TouchableOpacity>
 
                 <ThemedText style={[styles.dishName, { color: themeColors.textColor }]} numberOfLines={1}>
                     {item.name}
@@ -150,6 +155,7 @@ const DishShelf = memo(({ data, onAddToCart, isInCart, themeColors }: any) => {
                 contentContainerStyle={styles.shelfContent}
                 snapToInterval={CARD_WIDTH + 15}
                 decelerationRate="fast"
+                nestedScrollEnabled={true}
             />
         </View>
     );
@@ -157,12 +163,13 @@ const DishShelf = memo(({ data, onAddToCart, isInCart, themeColors }: any) => {
 
 const NearbyDishes: React.FC<NearbyDishesProps> = ({
     searchQuery = '',
-    categoryFilter = null,
+    categoryFilter = 'All',
     priceRange = 'all',
     ratingFilter = 0,
     sortBy = 'distance',
     ListHeaderComponent,
-    contentContainerStyle
+    contentContainerStyle,
+    isShelf = false
 }) => {
     const { dishes, loading, refresh } = useFoodFeed();
     const { addToCart, isInCart } = useCart();
@@ -225,13 +232,16 @@ const NearbyDishes: React.FC<NearbyDishesProps> = ({
         return result;
     }, [dishes, searchQuery, categoryFilter, priceRange, ratingFilter, sortBy]);
 
-    const chunkedData = useMemo(() => {
-        const chunks = [];
-        for (let i = 0; i < displayedDishes.length; i += ITEMS_PER_ROW) {
-            chunks.push({ id: `row-${i}`, data: displayedDishes.slice(i, i + ITEMS_PER_ROW) });
-        }
-        return chunks;
-    }, [displayedDishes]);
+    if (isShelf) {
+        return (
+            <DishShelf
+                data={displayedDishes}
+                onAddToCart={(dish: any) => addToCart({ ...dish, dishId: dish.id })}
+                isInCart={(id: string) => isInCart(id)}
+                themeColors={themeColors}
+            />
+        );
+    }
 
     if (loading && dishes.length === 0) {
         return (
@@ -250,14 +260,17 @@ const NearbyDishes: React.FC<NearbyDishesProps> = ({
 
     return (
         <FlatList
-            data={chunkedData}
+            data={displayedDishes}
             keyExtractor={item => item.id}
+            numColumns={2}
+            columnWrapperStyle={styles.columnWrapper}
             renderItem={({ item }) => (
-                <DishShelf
-                    data={item.data}
-                    onAddToCart={(dish: any) => addToCart({ ...dish, dishId: dish.id })}
-                    isInCart={(id: string) => isInCart(id)} // Validate this too: isInCart expects dishId?
+                <DishCard
+                    item={item}
+                    onAdd={(dish: any) => addToCart({ ...dish, dishId: dish.id })}
+                    inCart={isInCart(item.id)}
                     themeColors={themeColors}
+                    isGrid={true}
                 />
             )}
             contentContainerStyle={[styles.listContent, contentContainerStyle]}
@@ -287,8 +300,10 @@ const styles = StyleSheet.create({
     headerRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 20, marginBottom: 10, marginTop: 5 },
     sectionTitle: { fontSize: 22, fontWeight: '700' },
     shelfContainer: { marginBottom: 15 },
-    shelfContent: { paddingHorizontal: 20 },
+    shelfContent: { paddingHorizontal: 20, paddingBottom: 20 },
+    columnWrapper: { justifyContent: 'space-between', paddingHorizontal: 20, marginBottom: 15 },
     dishCard: { width: CARD_WIDTH, marginRight: 15, borderRadius: 20, overflow: 'hidden', borderWidth: 1, backgroundColor: '#fff', elevation: 4 },
+    dishCardGrid: { width: '47%', marginRight: 0, marginBottom: 20 },
     dishCardDisabled: { opacity: 0.9, backgroundColor: '#f9f9f9', borderColor: '#eee' },
     imageContainer: { position: 'relative' },
     dishImage: { width: '100%', height: 160 },
@@ -303,15 +318,15 @@ const styles = StyleSheet.create({
     ratingBadge: { flexDirection: 'row', alignItems: 'center', gap: 2, backgroundColor: 'rgba(255, 215, 0, 0.15)', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 8 },
     ratingText: { fontSize: 10, fontWeight: '700', color: '#B8860B' },
     dishName: { fontSize: 18, fontWeight: '700', marginBottom: 6 },
-    bottomRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-end' },
+    bottomRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-end', marginTop: 'auto' },
     priceLabel: { fontSize: 11, color: '#888', marginBottom: 2 },
-    price: { fontSize: 22, fontWeight: '800', color: '#f27c22' },
+    price: { fontSize: 18, fontWeight: '800', color: '#f27c22' },
 
     // Button Styles
-    addButton: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#f27c22', paddingVertical: 12, paddingHorizontal: 20, borderRadius: 25, gap: 6 },
+    addButton: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#f27c22', paddingVertical: 8, paddingHorizontal: 12, borderRadius: 25, gap: 4 },
     addButtonInCart: { backgroundColor: '#22c55e' }, // GREEN
     addButtonDisabled: { backgroundColor: '#999' }, // GREY
-    addButtonText: { color: '#fff', fontSize: 14, fontWeight: '600' },
+    addButtonText: { color: '#fff', fontSize: 12, fontWeight: '600' },
 });
 
 export default NearbyDishes;

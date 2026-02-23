@@ -7,7 +7,6 @@ import { supabase } from '@/utils/supabase';
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import * as Haptics from 'expo-haptics';
 import * as Linking from 'expo-linking';
-import * as Location from 'expo-location';
 import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
 import LottieView from 'lottie-react-native';
 import React, { useEffect, useRef, useState } from 'react';
@@ -28,22 +27,21 @@ import MapView, { Marker, PROVIDER_GOOGLE } from 'react-native-maps';
 const { width } = Dimensions.get('window');
 const HEADER_HEIGHT = 220;
 
-interface Restaurant {
+interface Store {
     id: string;
     name: string;
     address: string;
-    phone_number: string;
-    cuisine_type: string;
-    short_description: string | null;
-    detailed_description: string | null;
+    phone: string;
+    category: string;
+    description: string | null;
     logo_url: string | null;
-    restaurant_picture_url: string | null;
+    image_url: string | null;
     latitude: number;
     longitude: number;
     created_at: string;
 }
 
-interface MenuItem {
+interface StoreItem {
     id: string;
     name: string;
     description: string;
@@ -53,16 +51,15 @@ interface MenuItem {
     is_active: boolean;
 }
 
-export default function RestaurantProfileScreen() {
+export default function StoreProfileScreen() {
     const { id } = useLocalSearchParams();
     const router = useRouter();
     const { user } = useAuth();
-    const { addToCart, isInCart, cart } = useCart();
-    const [restaurant, setRestaurant] = useState<Restaurant | null>(null);
-    const [menu, setMenu] = useState<MenuItem[]>([]);
+    const { addToCart, isInCart } = useCart();
+    const [store, setStore] = useState<Store | null>(null);
+    const [items, setItems] = useState<StoreItem[]>([]);
     const [loading, setLoading] = useState(true);
     const [isFavorite, setIsFavorite] = useState(false);
-    const [userDistance, setUserDistance] = useState<number | null>(null);
     const scrollY = useRef(new Animated.Value(0)).current;
     const pulseAnim = useRef(new Animated.Value(1)).current;
 
@@ -74,7 +71,6 @@ export default function RestaurantProfileScreen() {
 
     useEffect(() => {
         fetchData();
-        getUserDistance();
         startPulseAnimation();
         if (user) {
             checkIfFavorite();
@@ -90,36 +86,27 @@ export default function RestaurantProfileScreen() {
         ).start();
     };
 
-    const getUserDistance = async () => {
-        try {
-            const { status } = await Location.requestForegroundPermissionsAsync();
-            if (status !== 'granted') return;
-            const loc = await Location.getCurrentPositionAsync({});
-            // Will calculate after restaurant loads
-        } catch (e) { console.log(e); }
-    };
-
     const fetchData = async () => {
         try {
             setLoading(true);
-            const { data: restData, error: restError } = await supabase
-                .from('restaurants')
+            const { data: storeData, error: storeError } = await supabase
+                .from('stores')
                 .select('*')
                 .eq('id', id)
                 .single();
 
-            if (restError) throw restError;
-            setRestaurant(restData);
+            if (storeError) throw storeError;
+            setStore(storeData);
 
-            const { data: menuData, error: menuError } = await supabase
-                .from('menu_items')
+            const { data: itemsData, error: itemsError } = await supabase
+                .from('store_items')
                 .select('*')
-                .eq('restaurant_id', id)
+                .eq('store_id', id)
                 .eq('is_active', true)
                 .order('category', { ascending: true });
 
-            if (menuError) throw menuError;
-            setMenu(menuData || []);
+            if (itemsError) throw itemsError;
+            setItems(itemsData || []);
         } catch (error) {
             console.error("Error:", error);
         } finally {
@@ -128,12 +115,12 @@ export default function RestaurantProfileScreen() {
     };
 
     const handleShare = async () => {
-        if (!restaurant) return;
+        if (!store) return;
         await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
         try {
             await Share.share({
-                message: `Check out ${restaurant.name} on Quible! 🍕`,
-                title: restaurant.name,
+                message: `Check out ${store.name} on Quible! 🛍️`,
+                title: store.name,
             });
         } catch (e) { console.log(e); }
     };
@@ -145,7 +132,7 @@ export default function RestaurantProfileScreen() {
             .select('id')
             .eq('user_id', user.id)
             .eq('reference_id', id)
-            .eq('type', 'restaurant')
+            .eq('type', 'store')
             .single();
 
         if (data) setIsFavorite(true);
@@ -165,11 +152,11 @@ export default function RestaurantProfileScreen() {
             await supabase.from('favorites').insert({
                 user_id: user.id,
                 reference_id: id,
-                type: 'restaurant',
+                type: 'store',
                 metadata: {
-                    name: restaurant?.name,
-                    cuisine: restaurant?.cuisine_type,
-                    image_url: restaurant?.logo_url
+                    name: store?.name,
+                    category: store?.category,
+                    image_url: store?.logo_url
                 }
             });
         } else {
@@ -177,23 +164,23 @@ export default function RestaurantProfileScreen() {
                 .delete()
                 .eq('user_id', user.id)
                 .eq('reference_id', id)
-                .eq('type', 'restaurant');
+                .eq('type', 'store');
         }
     };
 
-    const callRestaurant = () => {
-        if (restaurant?.phone_number) {
+    const callStore = () => {
+        if (store?.phone) {
             Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-            Linking.openURL(`tel:${restaurant.phone_number}`);
+            Linking.openURL(`tel:${store.phone}`);
         }
     };
 
     const openMaps = () => {
-        if (restaurant?.latitude && restaurant?.longitude) {
+        if (store?.latitude && store?.longitude) {
             Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
             const scheme = Platform.select({ ios: 'maps:0,0?q=', android: 'geo:0,0?q=' });
-            const latLng = `${restaurant.latitude},${restaurant.longitude}`;
-            const label = restaurant.name;
+            const latLng = `${store.latitude},${store.longitude}`;
+            const label = store.name;
             const url = Platform.select({
                 ios: `${scheme}${label}@${latLng}`,
                 android: `${scheme}${latLng}(${label})`
@@ -202,39 +189,38 @@ export default function RestaurantProfileScreen() {
         }
     };
 
-    const groupedMenu = menu.reduce((acc, item) => {
+    const groupedItems = items.reduce((acc, item) => {
         if (!acc[item.category]) acc[item.category] = [];
         acc[item.category].push(item);
         return acc;
-    }, {} as Record<string, MenuItem[]>);
-    const categories = Object.keys(groupedMenu);
+    }, {} as Record<string, StoreItem[]>);
+    const categories = Object.keys(groupedItems);
 
-    // Stats
-    const totalDishes = menu.length;
-    const avgPrice = totalDishes > 0 ? Math.round(menu.reduce((a, b) => a + b.price, 0) / totalDishes) : 0;
-    const memberSince = restaurant ? new Date(restaurant.created_at).getFullYear() : '';
+    const totalItems = items.length;
+    const avgPrice = totalItems > 0 ? Math.round(items.reduce((a, b) => a + b.price, 0) / totalItems) : 0;
+    const memberSince = store ? new Date(store.created_at).getFullYear() : '';
 
     if (loading) {
         return (
             <ThemedView style={styles.loadingContainer}>
                 <Stack.Screen options={{ headerShown: false }} />
                 <LottieView
-                    source={{ uri: 'https://lottie.host/32460ed7-5572-49d4-9b11-8096eee3437b/TzG7GfevAR.lottie' }}
+                    source={{ uri: 'https://lottie.host/cb2b36c4-f2d3-4d46-95cb-2840f8056cd3/xW3cOWzsY2.lottie' }}
                     style={{ width: 200, height: 200 }}
                     autoPlay
                     loop
                 />
-                <ThemedText style={{ marginTop: 10, opacity: 0.7 }}>Finding restaurant...</ThemedText>
+                <ThemedText style={{ marginTop: 10, opacity: 0.7 }}>Finding store...</ThemedText>
             </ThemedView>
         );
     }
 
-    if (!restaurant) {
+    if (!store) {
         return (
             <ThemedView style={styles.loadingContainer}>
                 <Stack.Screen options={{ headerShown: false }} />
-                <Ionicons name="restaurant-outline" size={60} color="#ccc" />
-                <ThemedText style={{ marginTop: 20 }}>Restaurant not found</ThemedText>
+                <Ionicons name="basket-outline" size={60} color="#ccc" />
+                <ThemedText style={{ marginTop: 20 }}>Store not found</ThemedText>
                 <TouchableOpacity onPress={() => router.back()} style={styles.goBackBtn}>
                     <Text style={{ color: '#fff' }}>Go Back</Text>
                 </TouchableOpacity>
@@ -242,7 +228,6 @@ export default function RestaurantProfileScreen() {
         );
     }
 
-    // Animations
     const headerHeight = scrollY.interpolate({
         inputRange: [0, HEADER_HEIGHT],
         outputRange: [HEADER_HEIGHT, 90],
@@ -271,16 +256,14 @@ export default function RestaurantProfileScreen() {
                 contentContainerStyle={{ paddingTop: HEADER_HEIGHT - 30, paddingBottom: 100 }}
                 showsVerticalScrollIndicator={false}
             >
-                {/* Main Card */}
                 <View style={[styles.mainCard, { backgroundColor: bg }]}>
-                    {/* Logo */}
                     <View style={styles.logoWrapper}>
                         <Animated.View style={{ transform: [{ scale: pulseAnim }] }}>
-                            {restaurant.logo_url ? (
-                                <Image source={{ uri: restaurant.logo_url }} style={styles.logo} />
+                            {store.logo_url ? (
+                                <Image source={{ uri: store.logo_url }} style={styles.logo} />
                             ) : (
                                 <View style={[styles.logo, styles.logoPlaceholder]}>
-                                    <Ionicons name="business" size={40} color="#fff" />
+                                    <Ionicons name="basket" size={40} color="#fff" />
                                 </View>
                             )}
                         </Animated.View>
@@ -289,17 +272,16 @@ export default function RestaurantProfileScreen() {
                         </View>
                     </View>
 
-                    <ThemedText type="title" style={styles.restName}>{restaurant.name}</ThemedText>
+                    <ThemedText type="title" style={styles.restName}>{store.name}</ThemedText>
                     <View style={styles.cuisineRow}>
-                        <MaterialCommunityIcons name="silverware-fork-knife" size={14} color={accentColor} />
-                        <ThemedText style={styles.cuisineText}>{restaurant.cuisine_type}</ThemedText>
+                        <MaterialCommunityIcons name="tag" size={14} color={accentColor} />
+                        <ThemedText style={styles.cuisineText}>{store.category}</ThemedText>
                     </View>
 
-                    {/* Stats Row */}
                     <View style={styles.statsRow}>
                         <View style={styles.statItem}>
-                            <ThemedText style={styles.statValue}>{totalDishes}</ThemedText>
-                            <ThemedText style={[styles.statLabel, { color: secondaryText }]}>Dishes</ThemedText>
+                            <ThemedText style={styles.statValue}>{totalItems}</ThemedText>
+                            <ThemedText style={[styles.statLabel, { color: secondaryText }]}>Items</ThemedText>
                         </View>
                         <View style={styles.statDivider} />
                         <View style={styles.statItem}>
@@ -313,9 +295,8 @@ export default function RestaurantProfileScreen() {
                         </View>
                     </View>
 
-                    {/* Action Buttons */}
                     <View style={styles.actionRow}>
-                        <TouchableOpacity style={styles.actionBtn} onPress={callRestaurant}>
+                        <TouchableOpacity style={styles.actionBtn} onPress={callStore}>
                             <Ionicons name="call" size={22} color={accentColor} />
                             <ThemedText style={styles.actionLabel}>Call</ThemedText>
                         </TouchableOpacity>
@@ -329,39 +310,37 @@ export default function RestaurantProfileScreen() {
                         </TouchableOpacity>
                     </View>
 
-                    {/* Description */}
                     <View style={styles.section}>
                         <ThemedText style={styles.sectionTitle}>About</ThemedText>
                         <ThemedText style={[styles.descText, { color: secondaryText }]}>
-                            {restaurant.detailed_description || restaurant.short_description || "This restaurant hasn't added a description yet."}
+                            {store.description || "This store hasn't added a description yet."}
                         </ThemedText>
                     </View>
 
-                    {/* Address & Map */}
                     <View style={styles.section}>
                         <ThemedText style={styles.sectionTitle}>Location</ThemedText>
                         <View style={styles.addressRow}>
                             <Ionicons name="location" size={18} color={accentColor} />
-                            <ThemedText style={[styles.addressText, { color: secondaryText }]}>{restaurant.address}</ThemedText>
+                            <ThemedText style={[styles.addressText, { color: secondaryText }]}>{store.address}</ThemedText>
                         </View>
-                        {restaurant.latitude && restaurant.longitude && (
+                        {store.latitude && store.longitude && (
                             <TouchableOpacity onPress={openMaps}>
                                 <View style={styles.mapPreview}>
                                     <MapView
                                         provider={PROVIDER_GOOGLE}
                                         style={StyleSheet.absoluteFill}
                                         initialRegion={{
-                                            latitude: restaurant.latitude,
-                                            longitude: restaurant.longitude,
+                                            latitude: store.latitude,
+                                            longitude: store.longitude,
                                             latitudeDelta: 0.005,
                                             longitudeDelta: 0.005,
                                         }}
                                         scrollEnabled={false}
                                         zoomEnabled={false}
                                     >
-                                        <Marker coordinate={{ latitude: restaurant.latitude, longitude: restaurant.longitude }}>
+                                        <Marker coordinate={{ latitude: store.latitude, longitude: store.longitude }}>
                                             <View style={styles.customMarker}>
-                                                <Ionicons name="restaurant" size={16} color="#fff" />
+                                                <Ionicons name="basket" size={16} color="#fff" />
                                             </View>
                                         </Marker>
                                     </MapView>
@@ -374,11 +353,10 @@ export default function RestaurantProfileScreen() {
                     </View>
                 </View>
 
-                {/* Menu Section */}
                 <View style={styles.menuSection}>
                     <View style={styles.menuHeader}>
-                        <ThemedText style={styles.menuTitle}>🍽️ Menu</ThemedText>
-                        <ThemedText style={[styles.menuCount, { color: secondaryText }]}>{totalDishes} items</ThemedText>
+                        <ThemedText style={styles.menuTitle}>🛒 Store Items</ThemedText>
+                        <ThemedText style={[styles.menuCount, { color: secondaryText }]}>{totalItems} items</ThemedText>
                     </View>
 
                     {categories.map(category => (
@@ -387,13 +365,13 @@ export default function RestaurantProfileScreen() {
                                 <View style={styles.categoryDot} />
                                 <ThemedText style={styles.categoryTitle}>{category}</ThemedText>
                             </View>
-                            {groupedMenu[category].map(item => {
+                            {groupedItems[category].map(item => {
                                 const inCart = isInCart(item.id);
                                 return (
                                     <TouchableOpacity
                                         key={item.id}
                                         style={[styles.menuCard, { backgroundColor: cardBg }]}
-                                        onPress={() => router.push(`/dish/${item.id}`)}
+                                        onPress={() => router.push(`/store-item/${item.id}`)}
                                         activeOpacity={0.8}
                                     >
                                         <View style={styles.menuCardContent}>
@@ -417,11 +395,18 @@ export default function RestaurantProfileScreen() {
                                                     if (!inCart) {
                                                         Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
                                                         addToCart({
-                                                            id: item.id, name: item.name, price: item.price,
-                                                            image_url: item.image_url,
-                                                            restaurant: { id: restaurant.id, name: restaurant.name },
-                                                            dishId: item.id
-                                                        } as any);
+                                                            ...item,
+                                                            itemId: item.id,
+                                                            type: 'store',
+                                                            quantity: 1,
+                                                            store: {
+                                                                id: store.id,
+                                                                name: store.name,
+                                                                logo_url: store.logo_url,
+                                                                latitude: store.latitude,
+                                                                longitude: store.longitude
+                                                            }
+                                                        });
                                                     }
                                                 }}
                                             >
@@ -434,10 +419,10 @@ export default function RestaurantProfileScreen() {
                         </View>
                     ))}
 
-                    {menu.length === 0 && (
+                    {items.length === 0 && (
                         <View style={styles.emptyMenu}>
-                            <Ionicons name="restaurant-outline" size={50} color="#ccc" />
-                            <ThemedText style={{ marginTop: 10, color: secondaryText }}>No menu items yet</ThemedText>
+                            <Ionicons name="basket-outline" size={50} color="#ccc" />
+                            <ThemedText style={{ marginTop: 10, color: secondaryText }}>No items found in this store</ThemedText>
                         </View>
                     )}
                 </View>
@@ -445,9 +430,9 @@ export default function RestaurantProfileScreen() {
 
             {/* Background Photo */}
             <Animated.View style={[styles.photoContainer, { height: headerHeight }]}>
-                {restaurant.restaurant_picture_url ? (
+                {store.image_url ? (
                     <Animated.Image
-                        source={{ uri: restaurant.restaurant_picture_url }}
+                        source={{ uri: store.image_url }}
                         style={[styles.headerImage, { transform: [{ scale: imageScale }] }]}
                     />
                 ) : (
@@ -462,7 +447,7 @@ export default function RestaurantProfileScreen() {
                     <Ionicons name="arrow-back" size={22} color="#fff" />
                 </TouchableOpacity>
                 <Animated.Text style={[styles.headerTitle, { opacity: titleOpacity }]} numberOfLines={1}>
-                    {restaurant.name}
+                    {store.name}
                 </Animated.Text>
                 <TouchableOpacity style={styles.headerBtn} onPress={toggleFavorite}>
                     <Ionicons name={isFavorite ? "heart" : "heart-outline"} size={22} color={isFavorite ? "#ff4757" : "#fff"} />

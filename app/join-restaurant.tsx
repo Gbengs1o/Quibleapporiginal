@@ -311,6 +311,22 @@ const JoinRestaurantScreen = () => {
   const router = useRouter();
   const [page, setPage] = useState(1);
   const [isLoading, setIsLoading] = useState(false);
+
+  React.useEffect(() => {
+    const checkExisting = async () => {
+      if (user) {
+        const { data } = await supabase
+          .from('restaurants')
+          .select('id, status')
+          .eq('owner_id', user.id)
+          .single();
+        if (data) {
+          router.replace('/restaurant/dashboard');
+        }
+      }
+    };
+    checkExisting();
+  }, [user]);
   const [formData, setFormData] = useState({
     restaurantName: '',
     ownerName: user ? `${user.user_metadata.first_name} ${user.user_metadata.last_name}` : '',

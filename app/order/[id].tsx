@@ -230,7 +230,7 @@ export default function OrderDetailScreen() {
         try {
             const { data, error } = await supabase
                 .from('orders')
-                .select('*, restaurant:restaurants(*), items:order_items(*, menu_item:menu_items(*))')
+                .select('*, restaurant:restaurants(*), store:stores(*), items:order_items(*, menu_item:menu_items(*), store_item:store_items(*))')
                 .eq('id', orderId)
                 .single();
 
@@ -281,7 +281,7 @@ export default function OrderDetailScreen() {
     };
 
     const handleCall = () => {
-        const phone = order?.restaurant?.phone;
+        const phone = order?.restaurant?.phone || order?.store?.phone;
         if (phone) {
             Linking.openURL(`tel:${phone}`);
         } else {
@@ -583,22 +583,25 @@ export default function OrderDetailScreen() {
                     <TouchableOpacity
                         style={[styles.card, { backgroundColor: colors.cardBg, borderColor: colors.cardBorder }]}
                         activeOpacity={0.85}
-                        onPress={() => router.push(`/restaurant-profile/${order.restaurant?.id}`)}
+                        onPress={() => {
+                            if (order.restaurant_id) router.push(`/restaurant-profile/${order.restaurant?.id}`);
+                            else if (order.store_id) router.push(`/store-profile/${order.store?.id}`);
+                        }}
                     >
                         <View style={styles.restaurantRow}>
-                            {order.restaurant?.image_url ? (
-                                <Image source={{ uri: order.restaurant.image_url }} style={styles.restaurantImage} />
+                            {order.restaurant?.image_url || order.store?.image_url ? (
+                                <Image source={{ uri: order.restaurant?.image_url || order.store?.image_url }} style={styles.restaurantImage} />
                             ) : (
                                 <LinearGradient colors={[colors.accent, '#E86A10']} style={styles.restaurantImagePlaceholder}>
-                                    <Ionicons name="restaurant" size={24} color="#fff" />
+                                    <Ionicons name={order.restaurant_id ? "restaurant" : "basket"} size={24} color="#fff" />
                                 </LinearGradient>
                             )}
                             <View style={styles.restaurantInfo}>
                                 <ThemedText style={[styles.restaurantName, { color: colors.text }]}>
-                                    {order.restaurant?.name || 'Restaurant'}
+                                    {order.restaurant?.name || order.store?.name || 'Vendor'}
                                 </ThemedText>
                                 <ThemedText style={[styles.restaurantAddress, { color: colors.textSecondary }]} numberOfLines={1}>
-                                    {order.restaurant?.address || 'Location'}
+                                    {order.restaurant?.address || order.store?.address || 'Location'}
                                 </ThemedText>
                             </View>
                             <Ionicons name="chevron-forward" size={20} color={colors.textMuted} />
@@ -669,7 +672,7 @@ export default function OrderDetailScreen() {
                             </View>
                             <View style={styles.itemInfo}>
                                 <ThemedText style={[styles.itemName, { color: colors.text }]}>
-                                    {item.menu_item?.name || 'Item'}
+                                    {item.menu_item?.name || item.store_item?.name || 'Item'}
                                 </ThemedText>
                                 <ThemedText style={[styles.itemPrice, { color: colors.textSecondary }]}>
                                     ₦{(item.price_at_time * item.quantity).toLocaleString()}
@@ -696,11 +699,11 @@ export default function OrderDetailScreen() {
                     <View style={styles.actionRow}>
                         <TouchableOpacity style={[styles.actionBtn, { backgroundColor: colors.accentLight }]} onPress={handleChat}>
                             <Ionicons name="chatbubbles" size={22} color={colors.accent} />
-                            <ThemedText style={[styles.actionBtnText, { color: colors.accent }]}>Chat Restaurant</ThemedText>
+                            <ThemedText style={[styles.actionBtnText, { color: colors.accent }]}>Chat {order.restaurant_id ? 'Restaurant' : 'Store'}</ThemedText>
                         </TouchableOpacity>
                         <TouchableOpacity style={[styles.actionBtn, { backgroundColor: '#22C55E20' }]} onPress={handleCall}>
                             <Ionicons name="call" size={22} color="#22C55E" />
-                            <ThemedText style={[styles.actionBtnText, { color: '#22C55E' }]}>Call Restaurant</ThemedText>
+                            <ThemedText style={[styles.actionBtnText, { color: '#22C55E' }]}>Call {order.restaurant_id ? 'Restaurant' : 'Store'}</ThemedText>
                         </TouchableOpacity>
                     </View>
 

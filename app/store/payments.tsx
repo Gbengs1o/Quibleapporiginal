@@ -20,7 +20,7 @@ export default function PaymentsScreen() {
     }, []);
 
     if (loading) {
-        return <FoodLoader message="Loading earnings..." />;
+        return <FoodLoader message="Loading earnings..." type="store" />;
     }
 
     return (

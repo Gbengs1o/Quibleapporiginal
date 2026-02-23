@@ -31,7 +31,7 @@ export default function OrdersScreen() {
   const { theme } = useTheme();
   const isDark = theme === 'dark';
 
-  const [activeTab, setActiveTab] = useState<'food' | 'logistics'>('food');
+  const [activeTab, setActiveTab] = useState<'food' | 'logistics' | 'items'>('food');
   const [deliveryRequests, setDeliveryRequests] = useState<any[]>([]);
   const [loadingLogistics, setLoadingLogistics] = useState(false);
 
@@ -59,7 +59,12 @@ export default function OrdersScreen() {
   }));
 
   useEffect(() => {
-    tabOffset.value = withSpring(activeTab === 'food' ? 0 : (width - 48) / 2, {
+    const tabWidth = (width - 48) / 3;
+    let offset = 0;
+    if (activeTab === 'logistics') offset = tabWidth;
+    else if (activeTab === 'items') offset = tabWidth * 2;
+
+    tabOffset.value = withSpring(offset, {
       damping: 18,
       stiffness: 150
     });
@@ -149,20 +154,23 @@ export default function OrdersScreen() {
         <View style={styles.cardHeader}>
           <View style={styles.restaurantInfo}>
             <View style={[styles.restaurantImageWrapper, { borderColor: colors.cardBorder }]}>
-              {order.restaurant?.image_url ? (
-                <Image source={{ uri: order.restaurant.image_url }} style={styles.restaurantImage} />
+              {order.restaurant?.image_url || order.store?.image_url ? (
+                <Image
+                  source={{ uri: order.restaurant?.image_url || order.store?.image_url }}
+                  style={styles.restaurantImage}
+                />
               ) : (
                 <LinearGradient
-                  colors={[colors.accent, '#E86A10']}
+                  colors={order.store_id ? [colors.teal, '#128C7E'] : [colors.accent, '#E86A10']}
                   style={styles.restaurantImagePlaceholder}
                 >
-                  <Ionicons name="restaurant" size={20} color="#fff" />
+                  <Ionicons name={order.store_id ? "basket" : "restaurant"} size={20} color="#fff" />
                 </LinearGradient>
               )}
             </View>
             <View style={styles.restaurantDetails}>
               <ThemedText style={[styles.restaurantName, { color: colors.text }]}>
-                {order.restaurant?.name || 'Restaurant'}
+                {(order.restaurant?.name || order.store?.name) || (order.store_id ? 'Store' : 'Restaurant')}
               </ThemedText>
               <View style={styles.orderMeta}>
                 <Ionicons name="time-outline" size={12} color={colors.textMuted} />
@@ -184,11 +192,11 @@ export default function OrdersScreen() {
         <View style={[styles.itemsContainer, { backgroundColor: isDark ? 'rgba(255,255,255,0.03)' : 'rgba(0,0,0,0.02)' }]}>
           {order.items?.slice(0, 3).map((item: any, idx: number) => (
             <View key={idx} style={styles.itemRow}>
-              <View style={[styles.itemQuantityBadge, { backgroundColor: colors.accentLight }]}>
-                <ThemedText style={[styles.itemQuantity, { color: colors.accent }]}>{item.quantity}x</ThemedText>
+              <View style={[styles.itemQuantityBadge, { backgroundColor: order.store_id ? colors.tealLight : colors.accentLight }]}>
+                <ThemedText style={[styles.itemQuantity, { color: order.store_id ? colors.teal : colors.accent }]}>{item.quantity}x</ThemedText>
               </View>
               <ThemedText numberOfLines={1} style={[styles.itemName, { color: colors.text }]}>
-                {item.menu_item?.name || 'Item'}
+                {item.menu_item?.name || item.store_item?.name || 'Item'}
               </ThemedText>
             </View>
           ))}
@@ -340,12 +348,14 @@ export default function OrdersScreen() {
         <MagmaAnimation size={140} />
       </View>
       <ThemedText style={[styles.emptyTitle, { color: colors.text }]}>
-        {type === 'food' ? 'No orders yet' : 'No deliveries yet'}
+        {type === 'food' ? 'No orders yet' : type === 'logistics' ? 'No deliveries yet' : 'No items purchased yet'}
       </ThemedText>
       <ThemedText style={[styles.emptySubtitle, { color: colors.textSecondary }]}>
         {type === 'food'
           ? 'Your food orders will appear here once you place them'
-          : 'Request a rider to send your packages anywhere'}
+          : type === 'logistics'
+            ? 'Request a rider to send your packages anywhere'
+            : 'Explore stores and buy items to see them here'}
       </ThemedText>
     </View>
   );
@@ -415,6 +425,23 @@ export default function OrdersScreen() {
               Deliveries
             </ThemedText>
           </TouchableOpacity>
+          <TouchableOpacity
+            style={styles.tabItem}
+            onPress={() => setActiveTab('items')}
+            activeOpacity={0.8}
+          >
+            <Ionicons
+              name={activeTab === 'items' ? 'basket' : 'basket-outline'}
+              size={18}
+              color={activeTab === 'items' ? '#fff' : colors.textSecondary}
+            />
+            <ThemedText style={[
+              styles.tabItemText,
+              { color: activeTab === 'items' ? '#fff' : colors.textSecondary }
+            ]}>
+              Items
+            </ThemedText>
+          </TouchableOpacity>
         </View>
       </View>
 
@@ -432,12 +459,12 @@ export default function OrdersScreen() {
       >
         {activeTab === 'food' ? (
           <>
-            {activeOrders.length > 0 && (
+            {activeOrders.filter(o => o.restaurant_id).length > 0 && (
               <View style={styles.section}>
                 <ThemedText style={[styles.sectionTitle, { color: colors.text }]}>
                   Active Orders
                 </ThemedText>
-                {activeOrders.map((order, index) => (
+                {activeOrders.filter(o => o.restaurant_id).map((order, index) => (
                   <View key={order.id}>{renderOrder({ item: order, index })}</View>
                 ))}
               </View>
@@ -446,10 +473,11 @@ export default function OrdersScreen() {
             {/* Recently Delivered - prominent section for orders delivered in last 2 hours */}
             {(() => {
               const twoHoursAgo = new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString();
-              const recentlyDelivered = pastOrders.filter(
+              const relevantPastOrders = pastOrders.filter(o => o.restaurant_id);
+              const recentlyDelivered = relevantPastOrders.filter(
                 (o) => o.status === 'delivered' && o.updated_at && o.updated_at > twoHoursAgo
               );
-              const olderPastOrders = pastOrders.filter(
+              const olderPastOrders = relevantPastOrders.filter(
                 (o) => !(o.status === 'delivered' && o.updated_at && o.updated_at > twoHoursAgo)
               );
               return (
@@ -483,9 +511,9 @@ export default function OrdersScreen() {
               );
             })()}
 
-            {activeOrders.length === 0 && pastOrders.length === 0 && renderEmptyState('food')}
+            {activeOrders.filter(o => o.restaurant_id).length === 0 && pastOrders.filter(o => o.restaurant_id).length === 0 && renderEmptyState('food')}
           </>
-        ) : (
+        ) : activeTab === 'logistics' ? (
           <>
             {deliveryRequests.length > 0 ? (
               <View style={styles.section}>
@@ -495,6 +523,34 @@ export default function OrdersScreen() {
               </View>
             ) : (
               renderEmptyState('logistics')
+            )}
+          </>
+        ) : (
+          <>
+            {activeOrders.filter(o => o.store_id).length > 0 && (
+              <View style={styles.section}>
+                <ThemedText style={[styles.sectionTitle, { color: colors.text }]}>
+                  Active Item Orders
+                </ThemedText>
+                {activeOrders.filter(o => o.store_id).map((order, index) => (
+                  <View key={order.id}>{renderOrder({ item: order, index })}</View>
+                ))}
+              </View>
+            )}
+
+            {activeOrders.filter(o => o.store_id).length === 0 && pastOrders.filter(o => o.store_id).length === 0 && renderEmptyState('items')}
+
+            {pastOrders.filter(o => o.store_id).length > 0 && (
+              <View style={styles.section}>
+                <ThemedText style={[styles.sectionTitle, { color: colors.textSecondary }]}>
+                  Past Item Purchases
+                </ThemedText>
+                {pastOrders.filter(o => o.store_id).map((order, index) => (
+                  <View key={order.id} style={{ opacity: 0.7 }}>
+                    {renderOrder({ item: order, index })}
+                  </View>
+                ))}
+              </View>
             )}
           </>
         )}
@@ -545,7 +601,7 @@ const styles = StyleSheet.create({
   },
   tabIndicator: {
     position: 'absolute',
-    width: '50%',
+    width: '33.33%',
     height: '100%',
     backgroundColor: '#F27C22',
     borderRadius: 12,

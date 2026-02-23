@@ -22,7 +22,7 @@ interface Wallet {
     store?: {
         owner_id: string;
         name: string;
-        image_url: string | null; // Assuming image_url or logo_url
+        logo_url: string | null;
     };
     rider?: {
         user_id: string;
@@ -41,6 +41,7 @@ interface Transaction {
 interface WalletContextType {
     personalWallet: Wallet | null;
     businessWallet: Wallet | null;
+    businessWallets: Wallet[];
     riderWallet: Wallet | null;
     activeWallet: Wallet | null;
     transactions: Transaction[];
@@ -61,6 +62,7 @@ export function WalletProvider({ children }: { children: React.ReactNode }) {
     const { user } = useAuth();
     const [personalWallet, setPersonalWallet] = useState<Wallet | null>(null);
     const [businessWallet, setBusinessWallet] = useState<Wallet | null>(null);
+    const [businessWallets, setBusinessWallets] = useState<Wallet[]>([]);
     const [riderWallet, setRiderWallet] = useState<Wallet | null>(null);
     const [activeWalletType, setActiveWalletType] = useState<WalletType>('personal');
     const [transactions, setTransactions] = useState<Transaction[]>([]);
@@ -123,28 +125,30 @@ export function WalletProvider({ children }: { children: React.ReactNode }) {
                 setPersonalWallet(pWallet);
             }
 
-            // Fetch Business Wallet (Linked via Restaurant)
-            // Need to join wallets -> restaurants where restaurants.owner_id = user.id
-            const { data: bWallet, error: bError } = await supabase
+            // Fetch Business Wallets (Linked via Restaurant or Store)
+            const { data: bWallets, error: bError } = await supabase
                 .from('wallets')
-                .select('*, restaurant:restaurants!inner(owner_id, name, logo_url)')
-                .eq('restaurant.owner_id', user?.id)
-                .eq('type', 'business')
-                .maybeSingle();
+                .select(`
+                    *,
+                    restaurant:restaurants(owner_id, name, logo_url),
+                    store:stores(owner_id, name, logo_url)
+                `)
+                .or(`restaurant_id.not.is.null,store_id.not.is.null`)
+                .eq('type', 'business');
 
-            if (bWallet) {
-                setBusinessWallet(bWallet as any);
-            } else {
-                // If no restaurant wallet, check for store wallet
-                const { data: sWallet, error: sError } = await supabase
-                    .from('wallets')
-                    .select('*, store:stores!inner(owner_id, name)')
-                    .eq('store.owner_id', user?.id)
-                    .eq('type', 'business')
-                    .maybeSingle();
+            if (bWallets && bWallets.length > 0) {
+                // Find wallets owned by current user
+                const userBusinessWallets = bWallets.filter(w =>
+                    (w.restaurant && w.restaurant.owner_id === user?.id) ||
+                    (w.store && w.store.owner_id === user?.id)
+                );
 
-                if (sWallet) {
-                    setBusinessWallet(sWallet as any);
+                if (userBusinessWallets.length > 0) {
+                    setBusinessWallets(userBusinessWallets as any);
+                    setBusinessWallet(userBusinessWallets[0] as any);
+                } else {
+                    setBusinessWallets([]);
+                    setBusinessWallet(null);
                 }
             }
 
@@ -313,6 +317,7 @@ export function WalletProvider({ children }: { children: React.ReactNode }) {
         <WalletContext.Provider value={{
             personalWallet,
             businessWallet,
+            businessWallets,
             riderWallet,
             activeWallet,
             transactions,

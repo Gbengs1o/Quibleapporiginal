@@ -290,8 +290,8 @@ export default function ReviewsScreen() {
         fetchData(true);
     };
 
-    if (loading && !refreshing) {
-        return <FoodLoader message="Loading reviews..." />;
+    if (loading) {
+        return <FoodLoader message="Loading reviews..." type="store" />;
     }
 
     return (

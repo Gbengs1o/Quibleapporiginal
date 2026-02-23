@@ -1,6 +1,7 @@
 import FoodLoader from '@/components/FoodLoader';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
+import { useAuth } from '@/contexts/auth';
 import { useRestaurantMenu } from '@/contexts/restaurant-menu';
 import { useWallet } from '@/contexts/wallet';
 import { useThemeColor } from '@/hooks/use-theme-color';
@@ -24,7 +25,11 @@ import {
 export default function WalletScreen() {
     const router = useRouter();
     const { openMenu } = useRestaurantMenu();
-    const { businessWallet, transactions, isLoading, refreshWallet, fundWallet, transferFunds, requestPayout, activateWallet, resolveRecipient } = useWallet();
+    const { businessWallets, transactions, isLoading, refreshWallet, fundWallet, transferFunds, requestPayout, activateWallet, resolveRecipient } = useWallet();
+    const { user } = useAuth();
+
+    // Find the specific store wallet
+    const businessWallet = businessWallets.find(w => w.store?.owner_id === user?.id) || businessWallets[0];
 
     // UI State
     const [showBalance, setShowBalance] = useState(true);
@@ -141,7 +146,7 @@ export default function WalletScreen() {
     const totalDebits = transactions.filter(t => t.type === 'debit').reduce((sum, t) => sum + t.amount, 0);
 
     if (isLoading && !businessWallet) {
-        return <FoodLoader message="Loading wallet..." />;
+        return <FoodLoader message="Loading wallet..." type="store" />;
     }
 
     const renderTransaction = ({ item }: { item: any }) => (
@@ -183,6 +188,10 @@ export default function WalletScreen() {
 
     const balanceFontSize = getBalanceFontSize(businessWallet?.balance || 0);
 
+    if (isLoading && transactions.length === 0) {
+        return <FoodLoader message="Loading wallet..." type="store" />;
+    }
+
     return (
         <ThemedView style={[styles.container, { backgroundColor: bgColor }]}>
             {/* Header */}
@@ -218,8 +227,8 @@ export default function WalletScreen() {
                                             </LinearGradient>
                                         )
                                     ) : (
-                                        // Store Icon Logic
-                                        <LinearGradient colors={['#4A90D9', '#0f3460']} style={styles.restaurantLogo}>
+                                        // Store Icon Logic (Orange instead of Blue)
+                                        <LinearGradient colors={['#f27c22', '#ff9a56']} style={styles.restaurantLogo}>
                                             <Ionicons name="storefront" size={24} color="#fff" />
                                         </LinearGradient>
                                     )}
@@ -299,7 +308,7 @@ export default function WalletScreen() {
                                 </TouchableOpacity>
                                 <TouchableOpacity style={styles.cardActionBtn} onPress={() => router.push('/history')}>
                                     <View style={styles.cardActionIcon}>
-                                        <Ionicons name="stats-chart" size={22} color="#a855f7" />
+                                        <Ionicons name="stats-chart" size={22} color="#f27c22" />
                                     </View>
                                     <ThemedText style={styles.cardActionText}>History</ThemedText>
                                 </TouchableOpacity>

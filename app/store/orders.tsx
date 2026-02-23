@@ -1,3 +1,4 @@
+import FoodLoader from '@/components/FoodLoader';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { useCall } from '@/contexts/call-context';
@@ -28,7 +29,7 @@ const STATUS_ACTIONS: Record<OrderStatus, { label: string, next: OrderStatus, co
     'received': { label: 'Accept & Prepare', next: 'preparing', color: '#f59e0b', icon: 'flame' },
     'preparing': { label: 'Mark Ready', next: 'ready', color: '#22c55e', icon: 'checkmark-circle' },
     'ready': { label: 'Assign Rider', next: 'with_rider', color: '#3b82f6', icon: 'bicycle', isSpecial: true },
-    'with_rider': { label: 'Verify Pickup', next: 'out_for_delivery', color: '#8b5cf6', icon: 'shield-checkmark', isSpecial: true, isVerify: true },
+    'with_rider': { label: 'Verify Pickup', next: 'out_for_delivery', color: '#f27c22', icon: 'shield-checkmark', isSpecial: true, isVerify: true },
     'out_for_delivery': null,
     'delivered': null,
     'cancelled': null
@@ -116,6 +117,10 @@ export default function OrdersScreen() {
             setChatLoading(null);
         }
     };
+
+    if (loading) {
+        return <FoodLoader message="Loading orders..." type="store" />;
+    }
 
     const renderOrderItem = ({ item: order }: { item: any }) => {
         const isPickup = !order.dropoff_latitude;
@@ -354,7 +359,7 @@ export default function OrdersScreen() {
                 ListEmptyComponent={
                     <View style={styles.emptyState}>
                         <LottieView
-                            source={{ uri: 'https://lottie.host/32460ed7-5572-49d4-9b11-8096eee3437b/TzG7GfevAR.lottie' }}
+                            source={{ uri: 'https://lottie.host/cb2b36c4-f2d3-4d46-95cb-2840f8056cd3/xW3cOWzsY2.lottie' }}
                             style={styles.emptyAnimation}
                             autoPlay
                             loop

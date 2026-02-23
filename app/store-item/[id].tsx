@@ -27,7 +27,7 @@ import MapView, { Marker, PROVIDER_GOOGLE } from 'react-native-maps';
 
 const { width, height } = Dimensions.get('window');
 
-interface DishDetail {
+interface StoreItemDetail {
     id: string;
     name: string;
     description: string;
@@ -35,47 +35,30 @@ interface DishDetail {
     image_url: string | null;
     is_active: boolean;
     category: string;
-    restaurant: {
+    stock_quantity: number;
+    store: {
         id: string;
         name: string;
         logo_url: string | null;
         latitude: number;
         longitude: number;
         address: string;
-        phone_number: string;
-        cuisine_type: string;
+        phone_number?: string;
     };
 }
 
-interface Review {
-    id: string;
-    rating: number;
-    comment: string | null;
-    reviewer_name: string;
-    reviewer_avatar: string | null;
-    created_at: string;
-}
-
-interface SimilarDish {
-    id: string;
-    name: string;
-    price: number;
-    image_url: string | null;
-}
-
-export default function DishProfileScreen() {
+export default function StoreItemProfileScreen() {
     const { id } = useLocalSearchParams();
     const router = useRouter();
     const { user } = useAuth();
-    const { addToCart, isInCart, updateQuantity, getItem } = useCart();
+    const { addToCart, isInCart } = useCart();
 
-    const [dish, setDish] = useState<DishDetail | null>(null);
-    const [similarDishes, setSimilarDishes] = useState<SimilarDish[]>([]);
+    const [item, setItem] = useState<StoreItemDetail | null>(null);
+    const [similarItems, setSimilarItems] = useState<any[]>([]);
     const [loading, setLoading] = useState(true);
     const [userLocation, setUserLocation] = useState<{ latitude: number; longitude: number } | null>(null);
     const [distance, setDistance] = useState<number | null>(null);
     const [isFavorite, setIsFavorite] = useState(false);
-    const [reviews, setReviews] = useState<Review[]>([]);
     const [quantity, setQuantity] = useState(1);
 
     const scrollY = useRef(new Animated.Value(0)).current;
@@ -87,7 +70,7 @@ export default function DishProfileScreen() {
     const cardBg = useThemeColor({ light: '#f8f9fa', dark: '#1c1c1e' }, 'background');
 
     useEffect(() => {
-        fetchDishDetails();
+        fetchItemDetails();
         getUserLocation();
         if (user) {
             checkIfFavorite();
@@ -95,7 +78,7 @@ export default function DishProfileScreen() {
     }, [id, user]);
 
     useEffect(() => {
-        if (!loading && dish) {
+        if (!loading && item) {
             Animated.spring(scaleAnim, {
                 toValue: 1,
                 friction: 5,
@@ -103,7 +86,7 @@ export default function DishProfileScreen() {
                 useNativeDriver: true,
             }).start();
         }
-    }, [loading, dish]);
+    }, [loading, item]);
 
     const getUserLocation = async () => {
         try {
@@ -123,40 +106,34 @@ export default function DishProfileScreen() {
             .select('id')
             .eq('user_id', user.id)
             .eq('reference_id', id)
-            .eq('type', 'dish')
+            .eq('type', 'store_item')
             .single();
 
         if (data) setIsFavorite(true);
     };
 
-    const fetchDishDetails = async () => {
+    const fetchItemDetails = async () => {
         try {
             const { data, error } = await supabase
-                .from('menu_items')
-                .select(`*, restaurant:restaurants!restaurant_id(*)`)
+                .from('store_items')
+                .select(`*, store:stores!store_id(*)`)
                 .eq('id', id)
                 .single();
 
             if (error) throw error;
-            setDish(data);
+            setItem(data);
 
-            // Fetch similar dishes from same restaurant (excluding current)
-            if (data?.restaurant?.id) {
+            // Fetch similar items from same store (excluding current)
+            if (data?.store?.id) {
                 const { data: similar } = await supabase
-                    .from('menu_items')
+                    .from('store_items')
                     .select('id, name, price, image_url')
-                    .eq('restaurant_id', data.restaurant.id)
+                    .eq('store_id', data.store.id)
                     .neq('id', id)
                     .eq('is_active', true)
                     .limit(5);
-                setSimilarDishes(similar || []);
+                setSimilarItems(similar || []);
             }
-
-            // Fetch reviews
-            const { data: reviewsData } = await supabase
-                .rpc('get_dish_reviews', { p_dish_id: id });
-
-            if (reviewsData) setReviews(reviewsData);
 
         } catch (error) {
             console.error(error);
@@ -166,14 +143,14 @@ export default function DishProfileScreen() {
     };
 
     useEffect(() => {
-        if (userLocation && dish?.restaurant) {
+        if (userLocation && item?.store) {
             const dist = calculateDistance(
                 userLocation.latitude, userLocation.longitude,
-                dish.restaurant.latitude, dish.restaurant.longitude
+                item.store.latitude, item.store.longitude
             );
             setDistance(dist);
         }
-    }, [userLocation, dish]);
+    }, [userLocation, item]);
 
     const calculateDistance = (lat1: number, lon1: number, lat2: number, lon2: number) => {
         const R = 6371;
@@ -184,27 +161,27 @@ export default function DishProfileScreen() {
         return R * c;
     };
 
-    const handleRestaurantPress = () => {
-        if (dish?.restaurant?.id) {
+    const handleStorePress = () => {
+        if (item?.store?.id) {
             Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-            router.push(`/restaurant-profile/${dish.restaurant.id}`);
+            router.push(`/store-profile/${item.store.id}`);
         }
     };
 
     const handleShare = async () => {
-        if (!dish) return;
+        if (!item) return;
         await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
         try {
             await Share.share({
-                message: `Check out ${dish.name} from ${dish.restaurant.name} on Quible! 🍔`,
-                title: dish.name,
+                message: `Check out ${item.name} from ${item.store.name} on Quible! 🛒`,
+                title: item.name,
             });
         } catch (e) { console.log(e); }
     };
 
     const toggleFavorite = async () => {
-        if (!user || !dish) {
-            if (!user) router.push('/login');
+        if (!user) {
+            router.push('/login');
             return;
         }
 
@@ -216,23 +193,23 @@ export default function DishProfileScreen() {
             await supabase.from('favorites').insert({
                 user_id: user.id,
                 reference_id: id,
-                type: 'dish',
-                metadata: { name: dish.name, price: dish.price, image_url: dish.image_url }
+                type: 'store_item',
+                metadata: { name: item?.name, price: item?.price, image_url: item?.image_url }
             });
         } else {
-            await supabase.from('favorites').delete().eq('user_id', user.id).eq('reference_id', id).eq('type', 'dish');
+            await supabase.from('favorites').delete().eq('user_id', user.id).eq('reference_id', id).eq('type', 'store_item');
         }
     };
 
-    const inCart = dish ? isInCart(dish.id) : false;
+    const inCart = isInCart(item?.id || '');
 
     const handleAddToCart = () => {
-        if (!dish) return;
+        if (!item) return;
         Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
         addToCart({
-            ...dish,
-            itemId: dish.id,
-            type: 'food',
+            ...item,
+            itemId: item.id,
+            type: 'store',
             quantity,
         });
     };
@@ -245,29 +222,30 @@ export default function DishProfileScreen() {
             <ThemedView style={styles.loadingContainer}>
                 <Stack.Screen options={{ headerShown: false }} />
                 <LottieView
-                    source={{ uri: 'https://lottie.host/32460ed7-5572-49d4-9b11-8096eee3437b/TzG7GfevAR.lottie' }}
+                    source={{ uri: 'https://lottie.host/cb2b36c4-f2d3-4d46-95cb-2840f8056cd3/xW3cOWzsY2.lottie' }}
                     style={{ width: 200, height: 200 }}
                     autoPlay
                     loop
                 />
-                <ThemedText style={{ marginTop: 10, opacity: 0.7 }}>Finding this dish...</ThemedText>
+                <ThemedText style={{ marginTop: 10, opacity: 0.7 }}>Finding this item...</ThemedText>
             </ThemedView>
         );
     }
 
-    if (!dish) {
+    if (!item) {
         return (
             <ThemedView style={styles.loadingContainer}>
                 <Stack.Screen options={{ headerShown: false }} />
-                <Ionicons name="fast-food-outline" size={60} color="#ccc" />
-                <ThemedText style={{ marginTop: 20 }}>Dish not found</ThemedText>
+                <Ionicons name="basket-outline" size={60} color="#ccc" />
+                <ThemedText style={{ marginTop: 20 }}>Item not found</ThemedText>
                 <TouchableOpacity onPress={() => router.back()} style={styles.goBackBtn}>
                     <Text style={{ color: '#fff' }}>Go Back</Text>
                 </TouchableOpacity>
             </ThemedView>
         );
     }
-    const totalPrice = dish.price * quantity;
+
+    const totalPrice = item.price * quantity;
 
     // Animations
     const imageHeight = scrollY.interpolate({ inputRange: [-100, 0, 300], outputRange: [400, 300, 200], extrapolate: 'clamp' });
@@ -281,7 +259,6 @@ export default function DishProfileScreen() {
             <Animated.ScrollView
                 onScroll={Animated.event([{ nativeEvent: { contentOffset: { y: scrollY } } }], { useNativeDriver: false })}
                 scrollEventThrottle={16}
-                style={styles.scrollContainer}
                 contentContainerStyle={{ paddingTop: 280, paddingBottom: 120 }}
                 showsVerticalScrollIndicator={false}
             >
@@ -290,35 +267,35 @@ export default function DishProfileScreen() {
                     {/* Category Tag */}
                     <View style={styles.categoryTag}>
                         <MaterialCommunityIcons name="tag" size={14} color="#f27c22" />
-                        <ThemedText style={styles.categoryText}>{dish.category}</ThemedText>
+                        <ThemedText style={styles.categoryText}>{item.category}</ThemedText>
                     </View>
 
-                    <ThemedText type="title" style={styles.dishName}>{dish.name}</ThemedText>
-                    <ThemedText style={styles.priceText}>₦{dish.price.toLocaleString()}</ThemedText>
+                    <ThemedText type="title" style={styles.itemName}>{item.name}</ThemedText>
+                    <ThemedText style={styles.priceText}>₦{item.price.toLocaleString()}</ThemedText>
 
                     <View style={styles.divider} />
 
                     <ThemedText style={styles.sectionLabel}>Description</ThemedText>
                     <ThemedText style={[styles.description, { color: secondaryText }]}>
-                        {dish.description || "This dish is a house specialty! Fresh ingredients prepared with love."}
+                        {item.description || "Premium quality item from our store. Available for immediate pickup or delivery."}
                     </ThemedText>
 
-                    {/* Restaurant Section */}
+                    {/* Store Section */}
                     <View style={styles.divider} />
                     <ThemedText style={styles.sectionLabel}>Sold By</ThemedText>
-                    <TouchableOpacity style={[styles.restaurantCard, { backgroundColor: cardBg }]} onPress={handleRestaurantPress} activeOpacity={0.8}>
-                        {dish.restaurant.logo_url ? (
-                            <Image source={{ uri: dish.restaurant.logo_url }} style={styles.restLogo} />
+                    <TouchableOpacity style={[styles.storeCard, { backgroundColor: cardBg }]} onPress={handleStorePress} activeOpacity={0.8}>
+                        {item.store.logo_url ? (
+                            <Image source={{ uri: item.store.logo_url }} style={styles.storeLogo} />
                         ) : (
-                            <View style={[styles.restLogo, styles.logoPlaceholder]}>
+                            <View style={[styles.storeLogo, styles.logoPlaceholder]}>
                                 <Ionicons name="business" size={24} color="#fff" />
                             </View>
                         )}
                         <View style={{ flex: 1 }}>
-                            <ThemedText style={styles.restName}>{dish.restaurant.name}</ThemedText>
-                            <View style={styles.restMetaRow}>
-                                <MaterialCommunityIcons name="silverware-fork-knife" size={12} color={secondaryText} />
-                                <ThemedText style={[styles.restMeta, { color: secondaryText }]}>{dish.restaurant.cuisine_type}</ThemedText>
+                            <ThemedText style={styles.storeName}>{item.store.name}</ThemedText>
+                            <View style={styles.storeMetaRow}>
+                                <Ionicons name="location-outline" size={12} color={secondaryText} />
+                                <ThemedText style={[styles.storeMeta, { color: secondaryText }]} numberOfLines={1}>{item.store.address}</ThemedText>
                             </View>
                         </View>
                         <Ionicons name="chevron-forward" size={20} color={secondaryText} />
@@ -342,86 +319,43 @@ export default function DishProfileScreen() {
                             provider={PROVIDER_GOOGLE}
                             style={StyleSheet.absoluteFill}
                             initialRegion={{
-                                latitude: dish.restaurant.latitude,
-                                longitude: dish.restaurant.longitude,
+                                latitude: item.store.latitude,
+                                longitude: item.store.longitude,
                                 latitudeDelta: 0.008,
                                 longitudeDelta: 0.008,
                             }}
                             showsUserLocation={true}
                             scrollEnabled={false}
                         >
-                            <Marker coordinate={{ latitude: dish.restaurant.latitude, longitude: dish.restaurant.longitude }}>
+                            <Marker coordinate={{ latitude: item.store.latitude, longitude: item.store.longitude }}>
                                 <View style={styles.customMarker}>
-                                    <Ionicons name="restaurant" size={16} color="#fff" />
+                                    <Ionicons name="basket" size={16} color="#fff" />
                                 </View>
                             </Marker>
                         </MapView>
                     </View>
 
-                    {/* Similar Dishes */}
-                    {similarDishes.length > 0 && (
+                    {/* Similar Items */}
+                    {similarItems.length > 0 && (
                         <>
                             <View style={[styles.divider, { marginTop: 25 }]} />
-                            <ThemedText style={styles.sectionLabel}>More from {dish.restaurant.name}</ThemedText>
+                            <ThemedText style={styles.sectionLabel}>More from {item.store.name}</ThemedText>
                             <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginTop: 10, marginHorizontal: -20, paddingHorizontal: 20 }}>
-                                {similarDishes.map(item => (
-                                    <TouchableOpacity key={item.id} style={[styles.similarCard, { backgroundColor: cardBg }]} onPress={() => router.replace(`/dish/${item.id}`)}>
-                                        {item.image_url ? (
-                                            <Image source={{ uri: item.image_url }} style={styles.similarImage} />
+                                {similarItems.map(sItem => (
+                                    <TouchableOpacity key={sItem.id} style={[styles.similarCard, { backgroundColor: cardBg }]} onPress={() => router.replace(`/store-item/${sItem.id}`)}>
+                                        {sItem.image_url ? (
+                                            <Image source={{ uri: sItem.image_url }} style={styles.similarImage} />
                                         ) : (
                                             <View style={[styles.similarImage, { backgroundColor: '#ddd', justifyContent: 'center', alignItems: 'center' }]}>
                                                 <Ionicons name="image-outline" size={20} color="#999" />
                                             </View>
                                         )}
-                                        <ThemedText numberOfLines={1} style={styles.similarName}>{item.name}</ThemedText>
-                                        <ThemedText style={styles.similarPrice}>₦{item.price.toLocaleString()}</ThemedText>
+                                        <ThemedText numberOfLines={1} style={styles.similarName}>{sItem.name}</ThemedText>
+                                        <ThemedText style={styles.similarPrice}>₦{sItem.price.toLocaleString()}</ThemedText>
                                     </TouchableOpacity>
                                 ))}
                             </ScrollView>
                         </>
-                    )}
-
-                    {/* Reviews Section */}
-                    <View style={[styles.divider, { marginTop: 25 }]} />
-                    <ThemedText style={styles.sectionLabel}>Reviews ({reviews.length})</ThemedText>
-
-                    {reviews.length > 0 ? (
-                        reviews.map((review) => (
-                            <View key={review.id} style={styles.reviewCard}>
-                                <View style={styles.reviewHeader}>
-                                    {review.reviewer_avatar ? (
-                                        <Image source={{ uri: review.reviewer_avatar }} style={styles.reviewerAvatar} />
-                                    ) : (
-                                        <View style={[styles.reviewerAvatar, { backgroundColor: '#ddd', justifyContent: 'center', alignItems: 'center' }]}>
-                                            <Ionicons name="person" size={20} color="#999" />
-                                        </View>
-                                    )}
-                                    <View style={{ flex: 1 }}>
-                                        <ThemedText style={styles.reviewerName}>{review.reviewer_name}</ThemedText>
-                                        <View style={{ flexDirection: 'row' }}>
-                                            {[...Array(5)].map((_, i) => (
-                                                <Ionicons
-                                                    key={i}
-                                                    name={i < review.rating ? "star" : "star-outline"}
-                                                    size={12}
-                                                    color="#f27c22"
-                                                />
-                                            ))}
-                                        </View>
-                                    </View>
-                                    <ThemedText style={styles.reviewDate}>
-                                        {new Date(review.created_at).toLocaleDateString()}
-                                    </ThemedText>
-                                </View>
-                                {review.comment && (
-                                    <ThemedText style={[styles.reviewComment, { color: secondaryText }]}>
-                                        {review.comment}
-                                    </ThemedText>
-                                )}
-                            </View>
-                        ))
-                    ) : (
-                        <ThemedText style={{ opacity: 0.5, marginTop: 10 }}>No reviews yet.</ThemedText>
                     )}
 
                     <View style={{ height: 40 }} />
@@ -430,30 +364,28 @@ export default function DishProfileScreen() {
 
             {/* Hero Image */}
             <Animated.View style={[styles.heroContainer, { height: imageHeight }]}>
-                {dish.image_url ? (
-                    <Animated.Image source={{ uri: dish.image_url }} style={[styles.heroImage, { transform: [{ scale: imageScale }] }]} />
+                {item.image_url ? (
+                    <Animated.Image source={{ uri: item.image_url }} style={[styles.heroImage, { transform: [{ scale: imageScale }] }]} />
                 ) : (
                     <View style={[styles.heroImage, { backgroundColor: '#333', justifyContent: 'center', alignItems: 'center' }]}>
-                        <Ionicons name="fast-food" size={80} color="#666" />
+                        <Ionicons name="basket" size={80} color="#666" />
                     </View>
                 )}
                 <View style={styles.heroOverlay} />
-            </Animated.View>
-
-            {/* Header Actions (Floating) */}
-            <View style={styles.heroActions}>
-                <TouchableOpacity style={styles.heroBtn} onPress={() => router.back()}>
-                    <Ionicons name="arrow-back" size={22} color="#fff" />
-                </TouchableOpacity>
-                <View style={{ flexDirection: 'row', gap: 10 }}>
-                    <TouchableOpacity style={styles.heroBtn} onPress={handleShare}>
-                        <Ionicons name="share-social" size={22} color="#fff" />
+                <View style={styles.heroActions}>
+                    <TouchableOpacity style={styles.heroBtn} onPress={() => router.back()}>
+                        <Ionicons name="arrow-back" size={22} color="#fff" />
                     </TouchableOpacity>
-                    <TouchableOpacity style={styles.heroBtn} onPress={toggleFavorite}>
-                        <Ionicons name={isFavorite ? "heart" : "heart-outline"} size={22} color={isFavorite ? "#ff4757" : "#fff"} />
-                    </TouchableOpacity>
+                    <View style={{ flexDirection: 'row', gap: 10 }}>
+                        <TouchableOpacity style={styles.heroBtn} onPress={handleShare}>
+                            <Ionicons name="share-social" size={22} color="#fff" />
+                        </TouchableOpacity>
+                        <TouchableOpacity style={styles.heroBtn} onPress={toggleFavorite}>
+                            <Ionicons name={isFavorite ? "heart" : "heart-outline"} size={22} color={isFavorite ? "#ff4757" : "#fff"} />
+                        </TouchableOpacity>
+                    </View>
                 </View>
-            </View>
+            </Animated.View>
 
             {/* Bottom Action Bar */}
             <View style={[styles.bottomBar, { backgroundColor: bg }]}>
@@ -486,28 +418,27 @@ export default function DishProfileScreen() {
 
 const styles = StyleSheet.create({
     container: { flex: 1 },
-    scrollContainer: { flex: 1, zIndex: 5 },
     loadingContainer: { flex: 1, justifyContent: 'center', alignItems: 'center' },
     goBackBtn: { backgroundColor: '#f27c22', paddingHorizontal: 20, paddingVertical: 10, borderRadius: 8, marginTop: 20 },
-    heroContainer: { position: 'absolute', top: 0, left: 0, right: 0, overflow: 'hidden', zIndex: 1 },
+    heroContainer: { position: 'absolute', top: 0, left: 0, right: 0, overflow: 'hidden', zIndex: 10 },
     heroImage: { width: '100%', height: '100%', resizeMode: 'cover' },
     heroOverlay: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(0,0,0,0.2)' },
-    heroActions: { position: 'absolute', top: 50, left: 15, right: 15, flexDirection: 'row', justifyContent: 'space-between', zIndex: 20 },
+    heroActions: { position: 'absolute', top: 50, left: 15, right: 15, flexDirection: 'row', justifyContent: 'space-between' },
     heroBtn: { backgroundColor: 'rgba(0,0,0,0.4)', borderRadius: 20, padding: 10 },
     contentCard: { borderTopLeftRadius: 30, borderTopRightRadius: 30, paddingHorizontal: 20, paddingTop: 25, paddingBottom: 20, minHeight: height * 0.6 },
     categoryTag: { flexDirection: 'row', alignItems: 'center', gap: 4, backgroundColor: 'rgba(242,124,34,0.1)', paddingVertical: 6, paddingHorizontal: 12, borderRadius: 20, alignSelf: 'flex-start', marginBottom: 10 },
     categoryText: { fontSize: 12, color: '#f27c22', fontWeight: '600' },
-    dishName: { fontSize: 26, fontWeight: 'bold' },
+    itemName: { fontSize: 26, fontWeight: 'bold' },
     priceText: { fontSize: 24, fontWeight: 'bold', color: '#f27c22', marginTop: 5 },
     divider: { height: 1, backgroundColor: '#eee', marginVertical: 20 },
     sectionLabel: { fontSize: 14, fontWeight: '700', textTransform: 'uppercase', marginBottom: 8, opacity: 0.6 },
     description: { fontSize: 15, lineHeight: 24 },
-    restaurantCard: { flexDirection: 'row', alignItems: 'center', padding: 12, borderRadius: 16, gap: 12 },
-    restLogo: { width: 50, height: 50, borderRadius: 25, backgroundColor: '#eee' },
+    storeCard: { flexDirection: 'row', alignItems: 'center', padding: 12, borderRadius: 16, gap: 12 },
+    storeLogo: { width: 50, height: 50, borderRadius: 25, backgroundColor: '#eee' },
     logoPlaceholder: { justifyContent: 'center', alignItems: 'center', backgroundColor: '#ccc' },
-    restName: { fontSize: 16, fontWeight: 'bold' },
-    restMetaRow: { flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 2 },
-    restMeta: { fontSize: 12 },
+    storeName: { fontSize: 16, fontWeight: 'bold' },
+    storeMetaRow: { flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 2 },
+    storeMeta: { fontSize: 12 },
     distanceRow: { marginTop: 15 },
     distanceBadge: { flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: 'rgba(242,124,34,0.1)', paddingVertical: 8, paddingHorizontal: 14, borderRadius: 20, alignSelf: 'flex-start' },
     distanceText: { fontSize: 14, color: '#f27c22', fontWeight: '600' },
@@ -523,10 +454,4 @@ const styles = StyleSheet.create({
     qtyText: { fontSize: 18, fontWeight: 'bold', minWidth: 30, textAlign: 'center' },
     addButton: { flex: 1, flexDirection: 'row', backgroundColor: '#f27c22', paddingVertical: 16, borderRadius: 16, justifyContent: 'center', alignItems: 'center', gap: 10 },
     addButtonText: { color: '#fff', fontSize: 16, fontWeight: 'bold' },
-    reviewCard: { marginBottom: 20, paddingBottom: 15, borderBottomWidth: 1, borderBottomColor: '#eee' },
-    reviewHeader: { flexDirection: 'row', alignItems: 'center', gap: 12, marginBottom: 8 },
-    reviewerAvatar: { width: 40, height: 40, borderRadius: 20 },
-    reviewerName: { fontWeight: '600', fontSize: 14 },
-    reviewDate: { fontSize: 12, opacity: 0.5 },
-    reviewComment: { fontSize: 14, lineHeight: 20 },
 });

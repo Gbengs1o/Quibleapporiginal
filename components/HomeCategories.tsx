@@ -9,7 +9,7 @@ import {
     StyleSheet,
     TextInput,
     TouchableOpacity,
-    View
+    View,
 } from 'react-native';
 import { ThemedText } from './themed-text';
 
@@ -26,6 +26,9 @@ interface HomeCategoriesProps {
     // Food-specific filters
     dishCategoryFilter: string | null;
     onDishCategoryChange: (category: string | null) => void;
+    // Store-specific filters
+    storeCategoryFilter: string | null;
+    onStoreCategoryChange: (category: string | null) => void;
     sortBy: SortOption;
     onSortChange: (sort: SortOption) => void;
     priceRange: PriceRange;
@@ -42,6 +45,7 @@ const CATEGORIES: { id: ServiceCategory; label: string; icon: string; iconType: 
 ];
 
 const DISH_CATEGORIES = ['African dishes', 'Special dishes', 'Others'];
+const STORE_CATEGORIES = ['Grocery', 'Pharmacy', 'Fashion', 'Electronics', 'Beauty', 'Home', 'Supermarket'];
 
 const SORT_OPTIONS: { id: SortOption; label: string; icon: string }[] = [
     { id: 'distance', label: 'Nearest', icon: 'location' },
@@ -72,6 +76,8 @@ const HomeCategories: React.FC<HomeCategoriesProps> = ({
     onSearchChange,
     dishCategoryFilter,
     onDishCategoryChange,
+    storeCategoryFilter,
+    onStoreCategoryChange,
     sortBy,
     onSortChange,
     priceRange,
@@ -105,6 +111,7 @@ const HomeCategories: React.FC<HomeCategoriesProps> = ({
 
     const activeFiltersCount = [
         dishCategoryFilter ? 1 : 0,
+        storeCategoryFilter ? 1 : 0,
         sortBy !== 'distance' ? 1 : 0,
         priceRange !== 'all' ? 1 : 0,
         ratingFilter > 0 ? 1 : 0,
@@ -112,6 +119,7 @@ const HomeCategories: React.FC<HomeCategoriesProps> = ({
 
     const clearAllFilters = () => {
         onDishCategoryChange(null);
+        onStoreCategoryChange(null);
         onSortChange('distance');
         onPriceRangeChange('all');
         onRatingFilterChange(0);
@@ -127,7 +135,9 @@ const HomeCategories: React.FC<HomeCategoriesProps> = ({
                     placeholder={
                         selectedCategory === 'food'
                             ? "Search dishes, restaurants..."
-                            : "Search for services..."
+                            : selectedCategory === 'store'
+                                ? "Search for stores and items..."
+                                : "Search for services..."
                     }
                     placeholderTextColor={secondaryText}
                     value={searchQuery}
@@ -139,8 +149,8 @@ const HomeCategories: React.FC<HomeCategoriesProps> = ({
                     </TouchableOpacity>
                 )}
 
-                {/* Filter Button - Only for Food */}
-                {selectedCategory === 'food' && (
+                {/* Filter Button - Food or Store */}
+                {(selectedCategory === 'food' || selectedCategory === 'store') && (
                     <TouchableOpacity
                         style={[
                             styles.filterButton,
@@ -216,6 +226,62 @@ const HomeCategories: React.FC<HomeCategoriesProps> = ({
                                 styles.quickFilterText,
                                 { color: secondaryText },
                                 dishCategoryFilter === cat && styles.quickFilterTextActive
+                            ]}>
+                                {cat}
+                            </ThemedText>
+                        </TouchableOpacity>
+                    ))}
+
+                    {/* Price Badges */}
+                    {PRICE_RANGES.slice(1).map((range) => (
+                        <TouchableOpacity
+                            key={range.id}
+                            style={[
+                                styles.quickFilterPill,
+                                { backgroundColor: pillBg },
+                                priceRange === range.id && styles.quickFilterPillActive
+                            ]}
+                            onPress={() => onPriceRangeChange(priceRange === range.id ? 'all' : range.id)}
+                        >
+                            <Ionicons
+                                name="pricetag"
+                                size={12}
+                                color={priceRange === range.id ? '#fff' : secondaryText}
+                            />
+                            <ThemedText style={[
+                                styles.quickFilterText,
+                                { color: secondaryText },
+                                priceRange === range.id && styles.quickFilterTextActive
+                            ]}>
+                                {range.label}
+                            </ThemedText>
+                        </TouchableOpacity>
+                    ))}
+                </ScrollView>
+            )}
+
+            {/* Store Category Quick Filters - Only when Store is selected */}
+            {selectedCategory === 'store' && (
+                <ScrollView
+                    horizontal
+                    showsHorizontalScrollIndicator={false}
+                    style={styles.quickFiltersScroll}
+                    contentContainerStyle={styles.quickFiltersContainer}
+                >
+                    {STORE_CATEGORIES.map((cat) => (
+                        <TouchableOpacity
+                            key={cat}
+                            style={[
+                                styles.quickFilterPill,
+                                { backgroundColor: pillBg },
+                                storeCategoryFilter === cat && styles.quickFilterPillActive
+                            ]}
+                            onPress={() => onStoreCategoryChange(storeCategoryFilter === cat ? null : cat)}
+                        >
+                            <ThemedText style={[
+                                styles.quickFilterText,
+                                { color: secondaryText },
+                                storeCategoryFilter === cat && styles.quickFilterTextActive
                             ]}>
                                 {cat}
                             </ThemedText>
@@ -334,47 +400,51 @@ const HomeCategories: React.FC<HomeCategoriesProps> = ({
                                 ))}
                             </View>
 
-                            {/* Dish Category */}
-                            <ThemedText style={[styles.filterSectionTitle, { color: textColor }]}>
-                                Dish Category
-                            </ThemedText>
-                            <View style={styles.optionsGrid}>
-                                <TouchableOpacity
-                                    style={[
-                                        styles.optionButton,
-                                        { backgroundColor: pillBg },
-                                        !dishCategoryFilter && styles.optionButtonActive
-                                    ]}
-                                    onPress={() => onDishCategoryChange(null)}
-                                >
-                                    <ThemedText style={[
-                                        styles.optionText,
-                                        { color: secondaryText },
-                                        !dishCategoryFilter && styles.optionTextActive
-                                    ]}>
-                                        All Categories
+                            {/* Category Filter */}
+                            {(selectedCategory === 'food' || selectedCategory === 'store') && (
+                                <>
+                                    <ThemedText style={[styles.filterSectionTitle, { color: textColor }]}>
+                                        {selectedCategory === 'food' ? 'Dish Category' : 'Store Category'}
                                     </ThemedText>
-                                </TouchableOpacity>
-                                {DISH_CATEGORIES.map((cat) => (
-                                    <TouchableOpacity
-                                        key={cat}
-                                        style={[
-                                            styles.optionButton,
-                                            { backgroundColor: pillBg },
-                                            dishCategoryFilter === cat && styles.optionButtonActive
-                                        ]}
-                                        onPress={() => onDishCategoryChange(cat)}
-                                    >
-                                        <ThemedText style={[
-                                            styles.optionText,
-                                            { color: secondaryText },
-                                            dishCategoryFilter === cat && styles.optionTextActive
-                                        ]}>
-                                            {cat}
-                                        </ThemedText>
-                                    </TouchableOpacity>
-                                ))}
-                            </View>
+                                    <View style={styles.optionsGrid}>
+                                        <TouchableOpacity
+                                            style={[
+                                                styles.optionButton,
+                                                { backgroundColor: pillBg },
+                                                (selectedCategory === 'food' ? !dishCategoryFilter : !storeCategoryFilter) && styles.optionButtonActive
+                                            ]}
+                                            onPress={() => selectedCategory === 'food' ? onDishCategoryChange(null) : onStoreCategoryChange(null)}
+                                        >
+                                            <ThemedText style={[
+                                                styles.optionText,
+                                                { color: secondaryText },
+                                                (selectedCategory === 'food' ? !dishCategoryFilter : !storeCategoryFilter) && styles.optionTextActive
+                                            ]}>
+                                                All Categories
+                                            </ThemedText>
+                                        </TouchableOpacity>
+                                        {(selectedCategory === 'food' ? DISH_CATEGORIES : STORE_CATEGORIES).map((cat) => (
+                                            <TouchableOpacity
+                                                key={cat}
+                                                style={[
+                                                    styles.optionButton,
+                                                    { backgroundColor: pillBg },
+                                                    (selectedCategory === 'food' ? dishCategoryFilter === cat : storeCategoryFilter === cat) && styles.optionButtonActive
+                                                ]}
+                                                onPress={() => selectedCategory === 'food' ? onDishCategoryChange(cat) : onStoreCategoryChange(cat)}
+                                            >
+                                                <ThemedText style={[
+                                                    styles.optionText,
+                                                    { color: secondaryText },
+                                                    (selectedCategory === 'food' ? dishCategoryFilter === cat : storeCategoryFilter === cat) && styles.optionTextActive
+                                                ]}>
+                                                    {cat}
+                                                </ThemedText>
+                                            </TouchableOpacity>
+                                        ))}
+                                    </View>
+                                </>
+                            )}
 
                             {/* Rating */}
                             <ThemedText style={[styles.filterSectionTitle, { color: textColor }]}>
@@ -441,7 +511,8 @@ const HomeCategories: React.FC<HomeCategoriesProps> = ({
 
 const styles = StyleSheet.create({
     container: {
-        paddingTop: 10,
+        paddingTop: 0,
+        marginTop: -15,
     },
     searchContainer: {
         flexDirection: 'row',
@@ -488,7 +559,7 @@ const styles = StyleSheet.create({
         fontSize: 22,
         fontWeight: '600',
         paddingHorizontal: 20,
-        marginBottom: 15,
+        marginBottom: 10,
     },
     categoriesContainer: {
         paddingHorizontal: 15,

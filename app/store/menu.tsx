@@ -9,6 +9,7 @@ import { supabase } from '@/utils/supabase';
 import { Feather, Ionicons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
 import { useNavigation } from 'expo-router';
+import LottieView from 'lottie-react-native';
 import React, { useEffect, useState } from 'react';
 import {
     ActivityIndicator,
@@ -37,7 +38,7 @@ interface MenuItem {
     created_at: string;
 }
 
-const CATEGORIES = ['African dishes', 'Special dishes', 'Others'] as const;
+const CATEGORIES = ['Grocery', 'Electronics', 'Fashion', 'Health & Beauty', 'Home & Office', 'Others'] as const;
 
 export default function StoreInventoryScreen() {
     const navigation = useNavigation();
@@ -401,8 +402,8 @@ export default function StoreInventoryScreen() {
 
     const activeFiltersCount = [filterCategory, filterStatus !== null ? 'status' : null].filter(Boolean).length;
 
-    if (loading && menuItems.length === 0) {
-        return <FoodLoader message="Loading menu..." />;
+    if (loading) {
+        return <FoodLoader message="Loading inventory..." type="store" />;
     }
 
     return (
@@ -519,10 +520,17 @@ export default function StoreInventoryScreen() {
             {/* Content */}
             <ScrollView style={styles.content} showsVerticalScrollIndicator={false}>
                 {loading ? (
-                    <ActivityIndicator size="large" color="#f27c22" style={{ marginTop: 60 }} />
+                    <View style={{ marginTop: 60 }}>
+                        <FoodLoader message="Loading products..." type="store" fullScreen={false} size={150} />
+                    </View>
                 ) : filteredItems.length === 0 ? (
                     <View style={styles.emptyState}>
-                        <Ionicons name="restaurant-outline" size={60} color={secondaryText} />
+                        <LottieView
+                            source={{ uri: 'https://lottie.host/cb2b36c4-f2d3-4d46-95cb-2840f8056cd3/xW3cOWzsY2.lottie' }}
+                            style={{ width: 150, height: 150 }}
+                            autoPlay
+                            loop
+                        />
                         <ThemedText style={[styles.emptyText, { color: textColor }]}>
                             {menuItems.length === 0 ? 'No products yet' : 'No products match your search'}
                         </ThemedText>

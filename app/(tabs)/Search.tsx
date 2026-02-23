@@ -6,6 +6,7 @@ import { supabase } from '@/utils/supabase';
 import { Ionicons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { LinearGradient } from 'expo-linear-gradient';
+import * as Location from 'expo-location';
 import { useRouter } from 'expo-router';
 import debounce from 'lodash/debounce';
 import React, { useCallback, useEffect, useState } from 'react';
@@ -66,13 +67,17 @@ const POPULAR_DISHES = [
 ];
 
 type SearchResult = {
-  type: 'restaurant' | 'dish' | 'rider';
+  type: 'restaurant' | 'dish' | 'rider' | 'store' | 'store_item';
   id: string;
   title: string;
   subtitle: string;
-  image?: string;
-  meta?: string;
+  image: string;
+  meta: string;
+  distance?: number;
+  price?: number;
 };
+
+const STORE_CATEGORIES = ['Grocery', 'Pharmacy', 'Fashion', 'Electronics', 'Beauty', 'Home', 'Supermarket'];
 
 const SEARCH_HISTORY_KEY = 'quible_search_history';
 
@@ -89,6 +94,15 @@ export default function SearchScreen() {
   const [menuItems, setMenuItems] = useState<any[]>([]);
   const [recentSearches, setRecentSearches] = useState<string[]>([]);
 
+  // Location & Filters
+  const [userLocation, setUserLocation] = useState<{ latitude: number; longitude: number } | null>(null);
+  const [sortBy, setSortBy] = useState('distance');
+  const [priceRange, setPriceRange] = useState('all');
+  const [ratingFilter, setRatingFilter] = useState(0);
+  const [activeTab, setActiveTab] = useState<'all' | 'food' | 'store' | 'rider'>('all');
+  const [storeCategory, setStoreCategory] = useState<string | null>(null);
+  const [foodCategory, setFoodCategory] = useState<string | null>(null);
+
   // Animations
   const searchFocus = useSharedValue(0);
   const pulseAnim = useSharedValue(1);
@@ -102,9 +116,33 @@ export default function SearchScreen() {
       -1,
       false
     );
+    initLocation();
     fetchFeedData();
     loadSearchHistory();
   }, []);
+
+  const initLocation = async () => {
+    try {
+      const { status } = await Location.requestForegroundPermissionsAsync();
+      if (status === 'granted') {
+        const loc = await Location.getLastKnownPositionAsync({});
+        if (loc) {
+          setUserLocation({ latitude: loc.coords.latitude, longitude: loc.coords.longitude });
+        }
+      }
+    } catch (e) {
+      console.log('Location error in Search', e);
+    }
+  };
+
+  const calculateDistance = (lat1: number, lon1: number, lat2: number, lon2: number) => {
+    if (!lat2 || !lon2) return 999;
+    const R = 6371;
+    const dLat = (lat2 - lat1) * Math.PI / 180;
+    const dLon = (lon2 - lon1) * Math.PI / 180;
+    const a = Math.sin(dLat / 2) * Math.sin(dLat / 2) + Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) * Math.sin(dLon / 2) * Math.sin(dLon / 2);
+    return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+  };
 
   const loadSearchHistory = async () => {
     try {
@@ -184,57 +222,148 @@ export default function SearchScreen() {
     setSearchText(text);
     if (text.length > 0) {
       searchFocus.value = withTiming(1);
-      performSearch(text);
+      performSearch(text, sortBy, priceRange, ratingFilter, activeTab, storeCategory, foodCategory);
     } else {
       searchFocus.value = withTiming(0);
       setResults([]);
     }
   };
 
+  // Re-run search when filters change
+  useEffect(() => {
+    if (searchText.length > 1) {
+      performSearch(searchText, sortBy, priceRange, ratingFilter, activeTab, storeCategory, foodCategory);
+    }
+  }, [sortBy, priceRange, ratingFilter, activeTab, searchText, storeCategory, foodCategory]);
+
   const performSearch = useCallback(
-    debounce(async (query: string) => {
-      // Verify query length to avoid empty searches
-      if (!query || query.trim().length < 2) return;
+    debounce(async (query: string, sBy: string, pRange: string, rFilter: number, aTab: string, sCat: string | null, fCat: string | null) => {
+      if (!query || query.trim().length < 2) {
+        setResults([]);
+        setLoading(false);
+        return;
+      }
 
       setLoading(true);
       try {
         const searchResults: SearchResult[] = [];
 
-        // 1. Search Restaurants (Name or Cuisine)
-        const { data: rests, error: restError } = await supabase
-          .from('restaurants')
-          .select('id, name, cuisine_type, image_url')
-          .or(`name.ilike.%${query}%,cuisine_type.ilike.%${query}%`)
-          .limit(5);
+        // 1. Search Restaurants
+        if (aTab === 'all' || aTab === 'food') {
+          let restQuery = supabase
+            .from('restaurants')
+            .select('id, name, cuisine_type, image_url, latitude, longitude')
+            .or(`name.ilike.%${query}%,cuisine_type.ilike.%${query}%`)
+            .eq('is_active', true);
 
-        if (!restError && rests) {
-          searchResults.push(...rests.map((r: any) => ({
-            type: 'restaurant' as const,
-            id: r.id,
-            title: r.name,
-            subtitle: r.cuisine_type || 'Restaurant',
-            image: r.image_url,
-            meta: 'Place'
-          })));
+          const { data: rests } = await restQuery.limit(10);
+
+          if (rests) {
+            searchResults.push(...rests.map((r: any) => ({
+              type: 'restaurant' as const,
+              id: r.id,
+              title: r.name,
+              subtitle: r.cuisine_type || 'Restaurant',
+              image: r.image_url || 'https://images.unsplash.com/photo-1517248135467-4c7edcad34c4?w=400', // Default image
+              meta: userLocation ? `${calculateDistance(userLocation.latitude, userLocation.longitude, r.latitude, r.longitude).toFixed(1)}km` : 'Place',
+              distance: userLocation ? calculateDistance(userLocation.latitude, userLocation.longitude, r.latitude, r.longitude) : 999,
+              price: 0
+            })));
+          }
         }
 
-        // 2. Search Dishes (Name)
-        const { data: items, error: itemError } = await supabase
-          .from('menu_items')
-          .select('id, name, price, image_url, restaurants(name)')
-          .ilike('name', `%${query}%`)
-          .limit(10);
+        // 2. Search Dishes
+        if (aTab === 'all' || aTab === 'food') {
+          let dishQuery = supabase
+            .from('menu_items')
+            .select('id, name, price, image_url, restaurants(name, latitude, longitude)')
+            .ilike('name', `%${query}%`)
+            .eq('is_active', true);
 
-        if (!itemError && items) {
-          searchResults.push(...items.map((m: any) => ({
-            type: 'dish' as const,
-            id: m.id,
-            title: m.name,
-            subtitle: m.restaurants?.name || 'Dish',
-            image: m.image_url,
-            meta: `₦${m.price}`
-          })));
+          if (fCat) {
+            dishQuery = dishQuery.ilike('category', `%${fCat}%`);
+          }
+
+          if (pRange === 'budget') dishQuery = dishQuery.lte('price', 2000);
+          else if (pRange === 'mid') dishQuery = dishQuery.gt('price', 2000).lte('price', 5000);
+          else if (pRange === 'premium') dishQuery = dishQuery.gt('price', 5000);
+
+          const { data: items } = await dishQuery.limit(15);
+
+          if (items) {
+            searchResults.push(...items.map((m: any) => ({
+              type: 'dish' as const,
+              id: m.id,
+              title: m.name,
+              subtitle: m.restaurants?.name || 'Dish',
+              image: m.image_url || 'https://images.unsplash.com/photo-1546069901-ba9599a7e63c?w=300', // Default image
+              meta: `₦${m.price.toLocaleString()}`,
+              distance: userLocation && m.restaurants ? calculateDistance(userLocation.latitude, userLocation.longitude, m.restaurants.latitude, m.restaurants.longitude) : 999,
+              price: m.price
+            })));
+          }
         }
+
+        // 3. Search Stores
+        if (aTab === 'all' || aTab === 'store') {
+          const { data: storesData } = await supabase
+            .from('stores')
+            .select('id, name, logo_url, address, latitude, longitude')
+            .ilike('name', `%${query}%`)
+            .limit(5);
+
+          if (storesData) {
+            searchResults.push(...storesData.map((s: any) => ({
+              type: 'store' as const,
+              id: s.id,
+              title: s.name,
+              subtitle: s.address || 'Store',
+              image: s.logo_url || 'https://images.unsplash.com/photo-1574484284002-952d92456975?w=300', // Default image
+              meta: 'Shop',
+              distance: userLocation ? calculateDistance(userLocation.latitude, userLocation.longitude, s.latitude, s.longitude) : 999,
+              price: 0
+            })));
+          }
+        }
+
+        // 4. Search Store Items
+        if (aTab === 'all' || aTab === 'store') {
+          let storeItemQuery = supabase
+            .from('store_items')
+            .select('id, name, price, image_url, stores(name, latitude, longitude)')
+            .ilike('name', `%${query}%`)
+            .eq('is_active', true);
+
+          if (sCat) {
+            storeItemQuery = storeItemQuery.ilike('category', `%${sCat}%`);
+          }
+
+          if (pRange === 'budget') storeItemQuery = storeItemQuery.lte('price', 2000);
+          else if (pRange === 'mid') storeItemQuery = storeItemQuery.gt('price', 2000).lte('price', 5000);
+          else if (pRange === 'premium') storeItemQuery = storeItemQuery.gt('price', 5000);
+
+          const { data: storeProducts } = await storeItemQuery.limit(15);
+
+          if (storeProducts) {
+            searchResults.push(...storeProducts.map((p: any) => ({
+              type: 'store_item' as const,
+              id: p.id,
+              title: p.name,
+              subtitle: p.stores?.name || 'Product',
+              image: p.image_url || 'https://images.unsplash.com/photo-1546069901-ba9599a7e63c?w=300', // Default image
+              meta: `₦${p.price.toLocaleString()}`,
+              distance: userLocation && p.stores ? calculateDistance(userLocation.latitude, userLocation.longitude, p.stores.latitude, p.stores.longitude) : 999,
+              price: p.price
+            })));
+          }
+        }
+
+        // 5. Final Sorting
+        searchResults.sort((a: any, b: any) => {
+          if (sBy === 'price_low') return (a.price || 0) - (b.price || 0);
+          if (sBy === 'price_high') return (b.price || 0) - (a.price || 0);
+          return (a.distance || 0) - (b.distance || 0);
+        });
 
         setResults(searchResults);
       } catch (error) {
@@ -243,7 +372,7 @@ export default function SearchScreen() {
         setLoading(false);
       }
     }, 500),
-    []
+    [userLocation]
   );
 
   const handleResultPress = (item: SearchResult) => {
@@ -252,6 +381,10 @@ export default function SearchScreen() {
       router.push(`/restaurant-profile/${item.id}`);
     } else if (item.type === 'dish') {
       router.push(`/dish/${item.id}`);
+    } else if (item.type === 'store') {
+      router.push(`/store-profile/${item.id}`);
+    } else if (item.type === 'store_item') {
+      router.push(`/store-item/${item.id}`);
     }
   };
 
@@ -437,6 +570,39 @@ export default function SearchScreen() {
     );
   };
 
+  const renderSearchResultItem = ({ item, index }: { item: SearchResult, index: number }) => (
+    <Animated.View
+      key={`${item.type}-${item.id}`}
+      entering={FadeInUp.delay(index * 60).springify()}
+    >
+      <TouchableOpacity
+        style={[styles.resultCard, { backgroundColor: colors.card, borderColor: colors.border }]}
+        onPress={() => handleResultPress(item)}
+      >
+        <View style={[styles.resultIcon, { backgroundColor: ORANGE_LIGHT }]}>
+          <Ionicons
+            name={
+              item.type === 'restaurant' ? 'restaurant' :
+                item.type === 'rider' ? 'bicycle' :
+                  item.type === 'store' ? 'storefront' :
+                    item.type === 'store_item' ? 'basket' :
+                      'fast-food'
+            }
+            size={20}
+            color={ORANGE}
+          />
+        </View>
+        <View style={styles.resultInfo}>
+          <ThemedText style={[styles.resultTitle, { color: colors.text }]}>{item.title}</ThemedText>
+          <ThemedText style={[styles.resultSub, { color: colors.textSec }]}>{item.subtitle}</ThemedText>
+        </View>
+        <View style={[styles.resultMeta, { backgroundColor: ORANGE_LIGHT }]}>
+          <ThemedText style={[styles.resultMetaText, { color: ORANGE }]}>{item.meta}</ThemedText>
+        </View>
+      </TouchableOpacity>
+    </Animated.View>
+  );
+
   const renderSearchResults = () => (
     <Animated.View entering={FadeInDown.springify()} style={styles.resultsContainer}>
       {loading && (
@@ -454,32 +620,114 @@ export default function SearchScreen() {
         </View>
       )}
 
-      {results.map((item, index) => (
-        <Animated.View
-          key={`${item.type}-${item.id}`}
-          entering={FadeInUp.delay(index * 60).springify()}
+      {results.length > 0 ? (
+        <FlatList
+          data={results}
+          keyExtractor={(item, index) => `${item.type}-${item.id}-${index}`}
+          renderItem={renderSearchResultItem}
+          contentContainerStyle={styles.resultsList}
+          ListHeaderComponent={
+            <View style={styles.filterSection}>
+              <ScrollView
+                horizontal
+                showsHorizontalScrollIndicator={false}
+                contentContainerStyle={styles.filterScroll}
+              >
+                {/* Category Tabs */}
+                {['all', 'food', 'store', 'rider'].map((tab) => (
+                  <TouchableOpacity
+                    key={tab}
+                    style={[
+                      styles.filterTab,
+                      activeTab === tab && styles.filterTabActive,
+                      { backgroundColor: activeTab === tab ? ORANGE : colors.card, borderColor: activeTab === tab ? ORANGE : colors.border }
+                    ]}
+                    onPress={() => setActiveTab(tab as any)}
+                  >
+                    <ThemedText style={[
+                      styles.filterTabText,
+                      activeTab === tab && styles.filterTabTextActive,
+                      { color: activeTab === tab ? '#FFF' : colors.textSec }
+                    ]}>
+                      {tab.charAt(0).toUpperCase() + tab.slice(1)}
+                    </ThemedText>
+                  </TouchableOpacity>
+                ))}
+
+                <View style={[styles.divider, { backgroundColor: colors.border }]} />
+
+                {/* Sort Button */}
+                <TouchableOpacity
+                  style={[styles.filterPill, sortBy !== 'distance' && styles.filterPillActive, { borderColor: ORANGE, backgroundColor: sortBy !== 'distance' ? ORANGE : colors.card }]}
+                  onPress={() => setSortBy(sortBy === 'distance' ? 'price_low' : sortBy === 'price_low' ? 'price_high' : 'distance')}
+                >
+                  <Ionicons name="swap-vertical" size={14} color={sortBy !== 'distance' ? '#fff' : ORANGE} />
+                  <ThemedText style={[styles.filterPillText, sortBy !== 'distance' && styles.filterPillTextActive, { color: sortBy !== 'distance' ? '#FFF' : ORANGE }]}>
+                    {sortBy === 'distance' ? 'Nearest' : sortBy === 'price_low' ? 'Price ↑' : 'Price ↓'}
+                  </ThemedText>
+                </TouchableOpacity>
+
+                <View style={[styles.divider, { backgroundColor: colors.border }]} />
+
+                {/* Price Filter */}
+                {['budget', 'mid', 'premium'].map((p) => (
+                  <TouchableOpacity
+                    key={p}
+                    style={[styles.filterPill, priceRange === p && styles.filterPillActive, { borderColor: ORANGE, backgroundColor: priceRange === p ? ORANGE : colors.card }]}
+                    onPress={() => setPriceRange(priceRange === p ? 'all' : p)}
+                  >
+                    <ThemedText style={[styles.filterPillText, priceRange === p && styles.filterPillTextActive, { color: priceRange === p ? '#FFF' : ORANGE }]}>
+                      {p.charAt(0).toUpperCase() + p.slice(1)}
+                    </ThemedText>
+                  </TouchableOpacity>
+                ))}
+
+                <View style={[styles.divider, { backgroundColor: colors.border }]} />
+
+                {/* Category Specific Filters */}
+                {activeTab === 'store' && STORE_CATEGORIES.map((c) => (
+                  <TouchableOpacity
+                    key={c}
+                    style={[styles.filterPill, storeCategory === c && styles.filterPillActive, { borderColor: ORANGE, backgroundColor: storeCategory === c ? ORANGE : colors.card }]}
+                    onPress={() => setStoreCategory(storeCategory === c ? null : c)}
+                  >
+                    <ThemedText style={[styles.filterPillText, storeCategory === c && styles.filterPillTextActive, { color: storeCategory === c ? '#FFF' : ORANGE }]}>
+                      {c}
+                    </ThemedText>
+                  </TouchableOpacity>
+                ))}
+
+                {activeTab === 'food' && ['African dishes', 'Special dishes', 'Others'].map((c) => (
+                  <TouchableOpacity
+                    key={c}
+                    style={[styles.filterPill, foodCategory === c && styles.filterPillActive, { borderColor: ORANGE, backgroundColor: foodCategory === c ? ORANGE : colors.card }]}
+                    onPress={() => setFoodCategory(foodCategory === c ? null : c)}
+                  >
+                    <ThemedText style={[styles.filterPillText, foodCategory === c && styles.filterPillTextActive, { color: foodCategory === c ? '#FFF' : ORANGE }]}>
+                      {c}
+                    </ThemedText>
+                  </TouchableOpacity>
+                ))}
+              </ScrollView>
+            </View>
+          }
+        />
+      ) : searchText.length > 0 && !loading ? (
+        <View style={styles.emptyContainer}>
+          <ThemedText style={[styles.emptyText, { color: colors.textSec }]}>
+            No results found for "{searchText}"
+          </ThemedText>
+        </View>
+      ) : (
+        <ScrollView
+          showsVerticalScrollIndicator={false}
+          contentContainerStyle={styles.scrollContent}
         >
-          <TouchableOpacity
-            style={[styles.resultCard, { backgroundColor: colors.card, borderColor: colors.border }]}
-            onPress={() => handleResultPress(item)}
-          >
-            <View style={[styles.resultIcon, { backgroundColor: ORANGE_LIGHT }]}>
-              <Ionicons
-                name={item.type === 'restaurant' ? 'restaurant' : item.type === 'rider' ? 'bicycle' : 'fast-food'}
-                size={20}
-                color={ORANGE}
-              />
-            </View>
-            <View style={styles.resultInfo}>
-              <ThemedText style={[styles.resultTitle, { color: colors.text }]}>{item.title}</ThemedText>
-              <ThemedText style={[styles.resultSub, { color: colors.textSec }]}>{item.subtitle}</ThemedText>
-            </View>
-            <View style={[styles.resultMeta, { backgroundColor: ORANGE_LIGHT }]}>
-              <ThemedText style={[styles.resultMetaText, { color: ORANGE }]}>{item.meta}</ThemedText>
-            </View>
-          </TouchableOpacity>
-        </Animated.View>
-      ))}
+          {renderFeaturedRestaurants()}
+          {renderPopularDishes()}
+          {renderSearchHistory()}
+        </ScrollView>
+      )}
     </Animated.View>
   );
 
@@ -555,6 +803,60 @@ const styles = StyleSheet.create({
     flex: 1,
     marginLeft: 12,
     fontSize: 16,
+  },
+  resultsList: {
+    paddingBottom: 20,
+  },
+  filterSection: {
+    paddingVertical: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: 'rgba(0,0,0,0.05)',
+    marginBottom: 8,
+  },
+  filterScroll: {
+    paddingHorizontal: 20,
+    gap: 10,
+    alignItems: 'center',
+  },
+  filterTab: {
+    paddingVertical: 8,
+    paddingHorizontal: 16,
+    borderRadius: 20,
+    borderWidth: 1,
+  },
+  filterTabActive: {
+    backgroundColor: ORANGE,
+  },
+  filterTabText: {
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  filterTabTextActive: {
+    color: '#fff',
+  },
+  divider: {
+    width: 1,
+    height: 20,
+    marginHorizontal: 5,
+  },
+  filterPill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 6,
+    paddingHorizontal: 12,
+    borderRadius: 15,
+    borderWidth: 1,
+    gap: 4,
+  },
+  filterPillActive: {
+    backgroundColor: ORANGE,
+  },
+  filterPillText: {
+    fontSize: 12,
+    fontWeight: '500',
+  },
+  filterPillTextActive: {
+    color: '#fff',
   },
   section: {
     marginBottom: 28,

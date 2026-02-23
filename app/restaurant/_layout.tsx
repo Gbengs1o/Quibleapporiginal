@@ -20,7 +20,7 @@ export default function RestaurantLayout() {
                     <Stack.Screen name="wallet" />
                     <Stack.Screen name="analytics" />
                 </Stack>
-                <CustomDrawerOverlay />
+                <CustomDrawerOverlay type="restaurant" />
             </StatusGuard>
         </RestaurantMenuProvider>
     );

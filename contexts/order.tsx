@@ -89,6 +89,17 @@ interface OrderContextType {
             dropoff_lng?: number;
         }
     ) => Promise<string>;
+    placeStoreOrder: (
+        storeId: string,
+        totalAmount: number,
+        items: { store_item_id: string; quantity: number; price: number; options?: string }[],
+        location?: {
+            pickup_lat?: number;
+            pickup_lng?: number;
+            dropoff_lat?: number;
+            dropoff_lng?: number;
+        }
+    ) => Promise<string>;
     cancelOrder: (orderId: string) => Promise<void>;
 }
 
@@ -220,6 +231,35 @@ export function OrderProvider({ children }: { children: React.ReactNode }) {
         return data.order_id;
     };
 
+    const placeStoreOrder = async (
+        storeId: string,
+        totalAmount: number,
+        items: { store_item_id: string; quantity: number; price: number; options?: string }[],
+        location?: {
+            pickup_lat?: number;
+            pickup_lng?: number;
+            dropoff_lat?: number;
+            dropoff_lng?: number;
+        }
+    ) => {
+        const { data, error } = await supabase.rpc('place_store_order', {
+            p_store_id: storeId,
+            p_total_amount: totalAmount,
+            p_items: items,
+            p_pickup_lat: location?.pickup_lat,
+            p_pickup_lng: location?.pickup_lng,
+            p_dropoff_lat: location?.dropoff_lat,
+            p_dropoff_lng: location?.dropoff_lng
+        });
+
+        if (error) throw error;
+        if (data && !data.success) throw new Error(data.message);
+
+        // Refresh to show new order immediately
+        refreshOrders();
+        return data.order_id;
+    };
+
     const cancelOrder = async (orderId: string) => {
         const { data, error } = await supabase.rpc('cancel_order_refund', {
             p_order_id: orderId
@@ -244,7 +284,18 @@ export function OrderProvider({ children }: { children: React.ReactNode }) {
     };
 
     return (
-        <OrderContext.Provider value={{ activeOrders, pastOrders, restaurantOrders, storeOrders, loading, refreshOrders, updateOrderStatus, placeOrder, cancelOrder }}>
+        <OrderContext.Provider value={{
+            activeOrders,
+            pastOrders,
+            restaurantOrders,
+            storeOrders,
+            loading,
+            refreshOrders,
+            updateOrderStatus,
+            placeOrder,
+            placeStoreOrder,
+            cancelOrder
+        }}>
             {children}
         </OrderContext.Provider>
     );

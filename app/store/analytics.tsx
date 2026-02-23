@@ -16,8 +16,8 @@ const { width } = Dimensions.get('window');
 // Colors
 const COLORS = {
     green: '#3CBD54',
-    orange: '#FF8818',
-    purple: '#A0A2F1',
+    orange: '#f27c22',
+    purple: '#FFB366', // Light Orange (instead of purple)
     blue: '#4A90D9',
     red: '#E74C3C',
     yellow: '#F1C40F',
@@ -221,7 +221,9 @@ export default function AnalyticsScreen() {
 
     const onRefresh = () => { setRefreshing(true); fetchAnalytics(); };
 
-    if (loading) return <FoodLoader message="Gathering insights..." />;
+    if (loading) {
+        return <FoodLoader message="Loading analytics..." type="store" />;
+    }
 
     const chartConfig = {
         backgroundColor: chartBg,

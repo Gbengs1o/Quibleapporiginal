@@ -199,7 +199,7 @@ export default function MessagesScreen() {
             case 'received': return '#f59e0b';
             case 'preparing': return '#3b82f6';
             case 'ready': return '#22c55e';
-            case 'with_rider': return '#8b5cf6';
+            case 'with_rider': return '#f27c22';
             case 'out_for_delivery': return '#06b6d4';
             case 'delivered': return '#22c55e';
             case 'cancelled': return '#ef4444';
@@ -282,7 +282,7 @@ export default function MessagesScreen() {
     const totalUnread = Object.values(unreadMap).reduce((sum, v) => sum + v, 0);
 
     if (loading) {
-        return <FoodLoader message="Loading messages..." />;
+        return <FoodLoader message="Loading messages..." type="store" />;
     }
 
     return (

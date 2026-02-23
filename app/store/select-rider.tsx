@@ -1,3 +1,4 @@
+import FoodLoader from '@/components/FoodLoader';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { useRestaurantMenu } from '@/contexts/restaurant-menu';
@@ -7,6 +8,7 @@ import { supabase } from '@/utils/supabase';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useLocalSearchParams, useRouter } from 'expo-router';
+import LottieView from 'lottie-react-native';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
     ActivityIndicator,
@@ -66,19 +68,67 @@ export default function SelectRiderScreen() {
     const countdownIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
     const fetchData = async () => {
-        if (!orderId) return;
-        setLoading(true);
+        if (!orderId) {
+            Alert.alert('Error', 'Missing orderId parameter');
+            setLoading(false);
+            return;
+        }
 
-        // 1. Fetch Bids, Invites & Expired
-        const { data: bidsData, error: bidsError } = await supabase
-            .from('order_rider_bids')
-            .select(`
-                id,
-                rider_id,
-                status,
-                created_at,
-                expired_at,
-                rider:riders!order_rider_bids_rider_id_fkey (
+        try {
+            setLoading(true);
+
+            // 1. Fetch Bids, Invites & Expired
+            const { data: bidsData, error: bidsError } = await supabase
+                .from('order_rider_bids')
+                .select(`
+                    id,
+                    rider_id,
+                    status,
+                    created_at,
+                    expired_at,
+                    rider:riders!order_rider_bids_rider_id_fkey (
+                        user_id,
+                        rider_photo,
+                        vehicle_type,
+                        vehicle_plate,
+                        status,
+                        average_rating,
+                        total_jobs,
+                        profile:profiles (
+                            first_name,
+                            last_name,
+                            phone_number
+                        )
+                    )
+                `)
+                .eq('order_id', orderId)
+                .in('status', ['pending', 'invited', 'expired'])
+                .order('created_at', { ascending: true });
+
+            if (bidsError) {
+                console.error('Error fetching bids:', bidsError);
+                Alert.alert('Bids Error', JSON.stringify(bidsError));
+            }
+
+            const allBids = (bidsData as any) || [];
+            // Separate pending bids from invites and expired
+            setBids(allBids.filter((b: any) => b.status === 'pending'));
+            setInvites(allBids.filter((b: any) => b.status === 'invited'));
+            setExpiredInvites(allBids.filter((b: any) => b.status === 'expired'));
+
+            // Initialize countdowns for active invites
+            const newCountdowns: Record<string, number> = {};
+            allBids.filter((b: any) => b.status === 'invited' && b.expired_at).forEach((b: any) => {
+                const remaining = Math.max(0, Math.floor((new Date(b.expired_at).getTime() - Date.now()) / 1000));
+                newCountdowns[b.id] = remaining;
+            });
+            setCountdowns(newCountdowns);
+
+            // 2. Fetch Available active riders
+            const { data: ridersData, error: ridersError } = await supabase
+                .from('riders')
+                .select(`
+                    id,
                     user_id,
                     rider_photo,
                     vehicle_type,
@@ -86,67 +136,36 @@ export default function SelectRiderScreen() {
                     status,
                     average_rating,
                     total_jobs,
-                    profile:profiles!fk_riders_profiles (
-                        first_name,
-                        last_name,
-                        phone_number
+                    profile:profiles (
+                       first_name,
+                       last_name,
+                       phone_number
                     )
-                )
-            `)
-            .eq('order_id', orderId)
-            .in('status', ['pending', 'invited', 'expired'])
-            .order('created_at', { ascending: true });
+                `)
+                .eq('status', 'active')
+                .eq('is_online', true);
 
-        if (bidsError) {
-            console.error('Error fetching bids:', bidsError);
+            if (ridersError) {
+                console.error('Error fetching riders:', ridersError);
+                Alert.alert('Riders API Error', JSON.stringify(ridersError));
+            }
+
+            // Filter out riders who have pending bids OR active invites
+            const excludedRiderUserIds = new Set(allBids.map((b: any) => b.rider_id));
+            const available = (ridersData as any || []).filter((r: any) => !excludedRiderUserIds.has(r.user_id));
+
+            setAvailableRiders(available);
+        } catch (error: any) {
+            console.error('Unexpected error in fetchData:', error);
+            Alert.alert('Unexpected JS Error', error?.message || String(error));
+        } finally {
+            setLoading(false);
         }
-
-        const allBids = (bidsData as any) || [];
-        // Separate pending bids from invites and expired
-        setBids(allBids.filter((b: any) => b.status === 'pending'));
-        setInvites(allBids.filter((b: any) => b.status === 'invited'));
-        setExpiredInvites(allBids.filter((b: any) => b.status === 'expired'));
-
-        // Initialize countdowns for active invites
-        const newCountdowns: Record<string, number> = {};
-        allBids.filter((b: any) => b.status === 'invited' && b.expired_at).forEach((b: any) => {
-            const remaining = Math.max(0, Math.floor((new Date(b.expired_at).getTime() - Date.now()) / 1000));
-            newCountdowns[b.id] = remaining;
-        });
-        setCountdowns(newCountdowns);
-
-        // 2. Fetch Available active riders
-        const { data: ridersData, error: ridersError } = await supabase
-            .from('riders')
-            .select(`
-                id,
-                user_id,
-                rider_photo,
-                vehicle_type,
-                vehicle_plate,
-                status,
-                average_rating,
-                total_jobs,
-                profile:profiles!fk_riders_profiles (
-                   first_name,
-                   last_name,
-                   phone_number
-                )
-            `)
-            .eq('status', 'active')
-            .eq('is_online', true);
-
-        if (ridersError) {
-            console.error('Error fetching riders:', ridersError);
-        }
-
-        // Filter out riders who have pending bids OR active invites
-        const excludedRiderUserIds = new Set(allBids.map((b: any) => b.rider_id));
-        const available = (ridersData as any || []).filter((r: any) => !excludedRiderUserIds.has(r.user_id));
-
-        setAvailableRiders(available);
-        setLoading(false);
     };
+
+    if (loading) {
+        return <FoodLoader message="Finding riders..." type="store" />;
+    }
 
     // Handle invite expiry
     const handleExpiry = useCallback(async () => {
@@ -568,7 +587,13 @@ export default function SelectRiderScreen() {
                                 ))
                             ) : (
                                 <View style={styles.emptySection}>
-                                    <ThemedText style={[styles.emptySectionText, { color: subtleText }]}>
+                                    <LottieView
+                                        source={{ uri: 'https://lottie.host/cb2b36c4-f2d3-4d46-95cb-2840f8056cd3/xW3cOWzsY2.lottie' }}
+                                        style={{ width: 100, height: 100, alignSelf: 'center' }}
+                                        autoPlay
+                                        loop
+                                    />
+                                    <ThemedText style={[styles.emptySectionText, { color: subtleText, textAlign: 'center' }]}>
                                         No other riders active nearby.
                                     </ThemedText>
                                 </View>

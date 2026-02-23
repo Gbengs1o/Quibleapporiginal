@@ -3,6 +3,7 @@ import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { useAuth } from '@/contexts/auth';
 import { useRestaurantMenu } from '@/contexts/restaurant-menu';
+import { useWallet } from '@/contexts/wallet';
 import { useThemeColor } from '@/hooks/use-theme-color';
 import { supabase } from '@/utils/supabase';
 import { Ionicons } from '@expo/vector-icons';
@@ -16,7 +17,7 @@ import {
     StyleSheet,
     Switch,
     TouchableOpacity,
-    View,
+    View
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import Svg, { Path } from 'react-native-svg';
@@ -33,7 +34,7 @@ const COLORS = {
     textWhite: '#FFFFFF',
     textDark: '#1B1B1B',
     textGrey: '#9ca3af',
-    purplePill: '#A0A2F1', // Light Purple Pill
+    purplePill: '#FFB366', // Light Orange Pill (instead of purple)
 };
 
 interface DashboardStats {
@@ -50,7 +51,10 @@ interface DashboardStats {
 export default function StoreDashboard() {
     const { openMenu } = useRestaurantMenu();
     const { user } = useAuth();
+    const { businessWallets, refreshWallet } = useWallet();
     const router = useRouter();
+
+    const storeWallet = businessWallets.find(w => w.store?.owner_id === user?.id);
 
     const [loading, setLoading] = useState(true);
     const [refreshing, setRefreshing] = useState(false);
@@ -76,6 +80,8 @@ export default function StoreDashboard() {
 
     const fetchDashboardData = async () => {
         try {
+            // Add a small delay to ensure the premium animation is visible
+            await new Promise(resolve => setTimeout(resolve, 1000));
             const { data: rest, error: restError } = await supabase
                 .from('stores')
                 .select('*')
@@ -173,7 +179,9 @@ export default function StoreDashboard() {
         fetchDashboardData();
     }, []);
 
-    if (loading) return <FoodLoader message="Loading dashboard..." />;
+    if (loading) {
+        return <FoodLoader message="Welcome back..." type="store" />;
+    }
 
     // Helper for Trend Pill
     const TrendPill = ({ percent }: { percent: number }) => (
@@ -244,6 +252,32 @@ export default function StoreDashboard() {
                     {/* Top Stats Cards (Dark) */}
                     <View style={styles.topStatsContainer}>
                         <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 15, paddingHorizontal: 20 }}>
+                            <TouchableOpacity
+                                style={[styles.darkCard, { backgroundColor: '#f27c22' }]}
+                                onPress={() => router.push('/store/wallet')}
+                            >
+                                <View style={styles.cardHeader}>
+                                    <ThemedText style={styles.cardTitle}>Wallet</ThemedText>
+                                    <View style={[styles.trendPill, { backgroundColor: 'rgba(255,255,255,0.2)' }]}>
+                                        <ThemedText style={styles.trendText}>Active</ThemedText>
+                                    </View>
+                                </View>
+                                <View style={{ flex: 1, justifyContent: 'center' }}>
+                                    <ThemedText style={styles.cardAmount}>
+                                        ₦{storeWallet?.balance.toLocaleString() || "0.00"}
+                                    </ThemedText>
+                                </View>
+                                <View style={styles.cardFooter}>
+                                    <ThemedText style={styles.cardSubtitle}>Current Balance</ThemedText>
+                                    <View style={styles.amountRow}>
+                                        <Ionicons name="wallet-outline" size={20} color="white" />
+                                        <ThemedText style={[styles.cardAmount, { fontSize: 14 }]}>
+                                            Tap to manage
+                                        </ThemedText>
+                                    </View>
+                                </View>
+                            </TouchableOpacity>
+
                             {/* Activity Card */}
                             <TouchableOpacity
                                 style={styles.darkCard}
