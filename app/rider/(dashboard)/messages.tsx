@@ -27,7 +27,7 @@ type TabType = 'Inbox' | 'Unread' | 'Calls';
 // Unified Interface for both Chat Types
 interface UnifiedChat {
     id: string;
-    type: 'delivery' | 'food_customer' | 'food_restaurant';
+    type: 'delivery' | 'food_customer' | 'food_restaurant' | 'food_store';
     title: string;
     subtitle: string; // Last message or status
     avatar_url: string | null;
@@ -89,16 +89,17 @@ export default function RiderMessagesScreen() {
                 .eq('rider_id', session.user.id);
 
             // --- 2. Fetch Food Order Chats ---
-            // Riders can see 'rider_customer' and 'rider_restaurant' chats for assigned orders.
+            // Riders can see customer, restaurant, and store order chats for assigned orders.
             const foodQuery = supabase
                 .from('order_chats')
                 .select(`
                     *,
                     order:orders!inner(id, status, rider_id),
                     customer:profiles!customer_id(first_name, last_name, profile_picture_url),
-                    restaurant:restaurants(name, logo_url)
+                    restaurant:restaurants(name, logo_url),
+                    store:stores(name, logo_url)
                 `)
-                .in('chat_type', ['rider_customer', 'rider_restaurant']); // Explicitly fetch only rider chats
+                .in('chat_type', ['rider_customer', 'rider_restaurant', 'rider_store']); // Explicitly fetch rider chats
 
             // Execute in parallel
             const [deliveryRes, foodRes] = await Promise.all([
@@ -174,11 +175,20 @@ export default function RiderMessagesScreen() {
                     title = chat.restaurant?.name || 'Restaurant';
                     avatar = chat.restaurant?.logo_url;
                     is_verified = true; // Restaurants are implicitly verified/official
+                } else if (chat.chat_type === 'rider_store') {
+                    title = chat.store?.name || 'Store';
+                    avatar = chat.store?.logo_url;
+                    is_verified = true; // Store accounts
                 }
 
                 unified.push({
                     id: chat.id,
-                    type: chat.chat_type === 'rider_restaurant' ? 'food_restaurant' : 'food_customer',
+                    type:
+                        chat.chat_type === 'rider_restaurant'
+                            ? 'food_restaurant'
+                            : chat.chat_type === 'rider_store'
+                                ? 'food_store'
+                                : 'food_customer',
                     title: title,
                     subtitle: chat.last_message || 'Order Chat',
                     avatar_url: avatar,
@@ -274,9 +284,14 @@ export default function RiderMessagesScreen() {
                         </ThemedText>
 
                         {item.type !== 'delivery' && (
-                            <View style={{ marginRight: 6, backgroundColor: item.type === 'food_restaurant' ? '#eab308' : '#3b82f6', borderRadius: 4, paddingHorizontal: 4 }}>
+                            <View style={{
+                                marginRight: 6,
+                                backgroundColor: item.type === 'food_restaurant' ? '#eab308' : item.type === 'food_store' ? '#7c3aed' : '#3b82f6',
+                                borderRadius: 4,
+                                paddingHorizontal: 4
+                            }}>
                                 <ThemedText style={{ fontSize: 9, color: '#fff', fontWeight: 'bold' }}>
-                                    {item.type === 'food_restaurant' ? 'REST' : 'CUST'}
+                                    {item.type === 'food_restaurant' ? 'REST' : item.type === 'food_store' ? 'STORE' : 'CUST'}
                                 </ThemedText>
                             </View>
                         )}

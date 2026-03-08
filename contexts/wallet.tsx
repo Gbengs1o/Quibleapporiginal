@@ -152,27 +152,14 @@ export function WalletProvider({ children }: { children: React.ReactNode }) {
                 }
             }
 
-            // Fetch Rider Wallet (separate wallet with type='rider')
-            // First get rider_id from riders table
-            const { data: riderData } = await supabase
-                .from('riders')
-                .select('id')
+            // Fetch Rider Wallet (owned by user_id + type='rider')
+            const { data: rWallet } = await supabase
+                .from('wallets')
+                .select('*')
                 .eq('user_id', user?.id)
-                .single();
-
-            console.log('WalletProvider: Found Rider ID:', riderData?.id);
-            if (riderData) {
-                const { data: rWallet } = await supabase
-                    .from('wallets')
-                    .select('*')
-                    .eq('rider_id', riderData.id)
-                    .eq('type', 'rider')
-                    .maybeSingle();
-
-                if (rWallet) {
-                    setRiderWallet(rWallet);
-                }
-            }
+                .eq('type', 'rider')
+                .maybeSingle();
+            setRiderWallet((rWallet as any) || null);
 
         } catch (error) {
             console.error('Error fetching wallets:', error);

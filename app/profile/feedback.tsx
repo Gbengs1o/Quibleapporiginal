@@ -2,9 +2,9 @@ import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { useAuth } from '@/contexts/auth';
 import { useThemeColor } from '@/hooks/use-theme-color';
-import { supabase } from '@/utils/supabase';
+import * as SupabaseUtils from '@/utils/supabase';
 import { Ionicons } from '@expo/vector-icons';
-import { useRouter } from 'expo-router';
+import * as ExpoRouter from 'expo-router';
 import React, { useState } from 'react';
 import {
     ActivityIndicator,
@@ -19,7 +19,7 @@ import {
 } from 'react-native';
 
 export default function FeedbackScreen() {
-    const router = useRouter();
+    const router = ExpoRouter.useRouter();
     const { user } = useAuth();
     const iconColor = useThemeColor({ light: '#1F2050', dark: '#fff' }, 'text');
     const inputBg = useThemeColor({ light: '#F5F5F5', dark: '#1e1e1e' }, 'background');
@@ -42,7 +42,8 @@ export default function FeedbackScreen() {
 
         try {
             setSubmitting(true);
-            const { error } = await supabase
+            console.log('Sending feedback:', { type, message: message.trim(), user_id: user.id });
+            const { error } = await SupabaseUtils.supabase
                 .from('feedback')
                 .insert({
                     user_id: user.id,

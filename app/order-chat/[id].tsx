@@ -50,6 +50,7 @@ export default function OrderChatScreen() {
     const [selectedImage, setSelectedImage] = useState<string | null>(null);
     const [otherUserTyping, setOtherUserTyping] = useState(false);
     const typingTimeout = useRef<NodeJS.Timeout | null>(null);
+    const typingChannelRef = useRef<any>(null);
 
     // Animations
     const headerAnim = useRef(new Animated.Value(0)).current;
@@ -68,58 +69,62 @@ export default function OrderChatScreen() {
     const { refreshNotifications } = useRiderNotifications();
 
     useEffect(() => {
-        if (chatId) {
-            fetchChatDetails();
-            fetchMessages();
-            startEntranceAnimations();
+        if (!chatId || !user?.id) return;
 
-            // Real-time subscription
-            const messageSub = supabase
-                .channel(`order_chat:${chatId}`)
-                .on('postgres_changes', {
-                    event: 'INSERT',
-                    schema: 'public',
-                    table: 'order_chat_messages',
-                    filter: `chat_id=eq.${chatId}`
-                },
-                    (payload) => {
-                        setMessages(prev => {
-                            const exists = prev.some(m => m.id === payload.new.id);
-                            if (exists) {
-                                return prev.map(m => m.id === payload.new.id ? payload.new : m);
-                            }
-                            return [...prev, payload.new];
-                        });
-                        setTimeout(() => flatListRef.current?.scrollToEnd({ animated: true }), 100);
+        fetchChatDetails();
+        fetchMessages();
+        startEntranceAnimations();
 
-                        // Mark as read immediately if it's from the other person
-                        if (payload.new.sender_id !== user?.id) {
-                            markMessagesAsRead(chatId as string);
+        // Real-time subscription
+        const messageSub = supabase
+            .channel(`order_chat:${chatId}`)
+            .on('postgres_changes', {
+                event: 'INSERT',
+                schema: 'public',
+                table: 'order_chat_messages',
+                filter: `chat_id=eq.${chatId}`
+            },
+                (payload) => {
+                    setMessages(prev => {
+                        const exists = prev.some(m => m.id === payload.new.id);
+                        if (exists) {
+                            return prev.map(m => m.id === payload.new.id ? payload.new : m);
                         }
-                    }
-                )
-                .subscribe();
+                        return [...prev, payload.new];
+                    });
+                    setTimeout(() => flatListRef.current?.scrollToEnd({ animated: true }), 100);
 
-            // Typing indicator
-            const typingChannel = supabase.channel(`order_typing:${chatId}`);
-            typingChannel
-                .on('broadcast', { event: 'typing' }, ({ payload }) => {
-                    if (payload.userId !== user?.id) {
-                        setOtherUserTyping(true);
-                        if (typingTimeout.current) clearTimeout(typingTimeout.current);
-                        typingTimeout.current = setTimeout(() => setOtherUserTyping(false), 3000);
+                    // Mark as read immediately if it's from the other person
+                    if (payload.new.sender_id !== user?.id) {
+                        markMessagesAsRead(chatId as string);
                     }
-                })
-                .subscribe();
+                }
+            )
+            .subscribe();
 
-            return () => {
-                supabase.removeChannel(messageSub);
-                supabase.removeChannel(typingChannel);
-                if (typingTimeout.current) clearTimeout(typingTimeout.current);
-                refreshNotifications();
-            };
-        }
-    }, [chatId]);
+        // Typing indicator
+        const typingChannel = supabase.channel(`order_typing:${chatId}`);
+        typingChannelRef.current = typingChannel;
+        typingChannel
+            .on('broadcast', { event: 'typing' }, ({ payload }) => {
+                if (payload.userId !== user?.id) {
+                    setOtherUserTyping(true);
+                    if (typingTimeout.current) clearTimeout(typingTimeout.current);
+                    typingTimeout.current = setTimeout(() => setOtherUserTyping(false), 3000);
+                }
+            })
+            .subscribe();
+
+        return () => {
+            supabase.removeChannel(messageSub);
+            if (typingChannelRef.current) {
+                supabase.removeChannel(typingChannelRef.current);
+                typingChannelRef.current = null;
+            }
+            if (typingTimeout.current) clearTimeout(typingTimeout.current);
+            refreshNotifications();
+        };
+    }, [chatId, user?.id]);
 
     const startEntranceAnimations = () => {
         Animated.parallel([
@@ -140,33 +145,35 @@ export default function OrderChatScreen() {
     };
 
     const fetchChatDetails = async () => {
+        if (!chatId) return;
         try {
             const { data: chat } = await supabase
                 .from('order_chats')
-                .select('*, restaurant:restaurants(*), order:orders(*)')
+                .select('*, restaurant:restaurants(*), store:stores(*), order:orders(*)')
                 .eq('id', chatId)
                 .single();
 
             if (chat) {
                 setChatDetails(chat);
-                setRestaurant(chat.restaurant);
+                setRestaurant(chat.restaurant || chat.store);
 
                 // Fetch customer profile
                 if (chat.customer_id) {
                     const { data: customerData } = await supabase
                         .from('profiles')
-                        .select('first_name, last_name, profile_picture_url, phone_number')
+                        .select('id, first_name, last_name, profile_picture_url, phone_number')
                         .eq('id', chat.customer_id)
                         .single();
                     setCustomer(customerData);
                 }
 
-                // Fetch restaurant owner profile
-                if (chat.restaurant?.owner_id) {
+                // Fetch business owner profile (restaurant/store)
+                const businessOwnerId = chat.restaurant?.owner_id || chat.store?.owner_id;
+                if (businessOwnerId) {
                     const { data: ownerData } = await supabase
                         .from('profiles')
                         .select('id, phone_number, first_name, last_name')
-                        .eq('id', chat.restaurant.owner_id)
+                        .eq('id', businessOwnerId)
                         .single();
                     setRestaurantOwner(ownerData);
                 }
@@ -176,7 +183,7 @@ export default function OrderChatScreen() {
                 if (riderId) {
                     const { data: riderData } = await supabase
                         .from('profiles')
-                        .select('first_name, last_name, profile_picture_url, phone_number')
+                        .select('id, first_name, last_name, profile_picture_url, phone_number')
                         .eq('id', riderId)
                         .single();
                     setRider(riderData);
@@ -191,7 +198,7 @@ export default function OrderChatScreen() {
     };
 
     const markMessagesAsRead = async (currentChatId: string) => {
-        if (!user?.id) return;
+        if (!user?.id || !currentChatId) return;
         try {
             await supabase
                 .from('order_chat_messages')
@@ -207,6 +214,7 @@ export default function OrderChatScreen() {
     };
 
     const fetchMessages = async () => {
+        if (!chatId) return;
         try {
             const { data, error } = await supabase
                 .from('order_chat_messages')
@@ -225,8 +233,8 @@ export default function OrderChatScreen() {
 
     const handleInputText = (text: string) => {
         setInputText(text);
-        if (text.length > 0) {
-            supabase.channel(`order_typing:${chatId}`).send({
+        if (text.length > 0 && typingChannelRef.current) {
+            typingChannelRef.current.send({
                 type: 'broadcast',
                 event: 'typing',
                 payload: { userId: user?.id }
@@ -248,6 +256,7 @@ export default function OrderChatScreen() {
     };
 
     const sendMediaMessage = async (uri: string) => {
+        if (!chatId) return;
         setSending(true);
         try {
             const cloudUrl = await uploadToCloudinary(uri, 'image');
@@ -285,7 +294,7 @@ export default function OrderChatScreen() {
     };
 
     const sendTextMessage = async () => {
-        if (!inputText.trim() || sending) return;
+        if (!chatId || !inputText.trim() || sending) return;
         setSending(true);
         try {
             const content = inputText.trim();
@@ -317,12 +326,22 @@ export default function OrderChatScreen() {
         }
     };
 
-    // Determine if current user is the restaurant owner
-    const isRestaurantOwner = user?.id === chatDetails?.restaurant?.owner_id;
+    // Determine if current user is the business owner (restaurant/store)
+    const isBusinessOwner = user?.id === (chatDetails?.restaurant?.owner_id || chatDetails?.store?.owner_id);
     const isRider = user?.id === chatDetails?.order?.rider_id;
+
+    const isStoreContext =
+        !!chatDetails?.store_id ||
+        !!chatDetails?.store ||
+        chatDetails?.chat_type === 'rider_store' ||
+        target === 'store';
 
     // Context-aware: who is the "other party" for this user?
     const getOtherPartyInfo = () => {
+        const businessLabel = isStoreContext ? 'Store' : 'Restaurant';
+        const businessIcon = isStoreContext ? 'storefront' : 'restaurant';
+        const businessOwnerId = restaurantOwner?.id || chatDetails?.restaurant?.owner_id || chatDetails?.store?.owner_id;
+
         // If target is explicitly set, prioritize that
         if (target === 'customer' || target === 'user') {
             return {
@@ -335,20 +354,20 @@ export default function OrderChatScreen() {
             };
         }
 
-        if (target === 'restaurant') {
+        if (target === 'restaurant' || target === 'store') {
             return {
-                id: restaurantOwner?.id || chatDetails?.restaurant?.owner_id,
-                name: restaurant?.name || 'Restaurant',
+                id: businessOwnerId,
+                name: restaurant?.name || businessLabel,
                 avatar: restaurant?.image_url || restaurant?.logo_url,
-                subtitle: 'Restaurant',
+                subtitle: businessLabel,
                 phone: restaurant?.phone || restaurantOwner?.phone_number,
-                icon: 'restaurant' as const,
+                icon: businessIcon as any,
             };
         }
 
-        if (isRestaurantOwner) {
-            // Restaurant Owner interacting with Customer or Rider
-            if (chatDetails?.chat_type === 'rider_restaurant') {
+        if (isBusinessOwner) {
+            // Business owner interacting with Customer or Rider
+            if (chatDetails?.chat_type === 'rider_restaurant' || chatDetails?.chat_type === 'rider_store') {
                 return {
                     id: chatDetails?.order?.rider_id,
                     name: rider ? `${rider.first_name || ''} ${rider.last_name || ''}`.trim() : 'Rider',
@@ -380,14 +399,14 @@ export default function OrderChatScreen() {
                     icon: 'person' as const,
                 };
             } else {
-                // Default to Restaurant (rider_restaurant or fallback)
+                // Default to Store/Restaurant (rider_store / rider_restaurant / fallback)
                 return {
-                    id: restaurantOwner?.id || chatDetails?.restaurant?.owner_id,
-                    name: restaurant?.name || 'Restaurant',
+                    id: businessOwnerId,
+                    name: restaurant?.name || businessLabel,
                     avatar: restaurant?.image_url || restaurant?.logo_url,
-                    subtitle: 'Restaurant',
+                    subtitle: businessLabel,
                     phone: restaurant?.phone || restaurantOwner?.phone_number,
-                    icon: 'restaurant' as const,
+                    icon: businessIcon as any,
                 };
             }
         } else {
@@ -402,14 +421,14 @@ export default function OrderChatScreen() {
                     icon: 'bicycle' as const,
                 };
             } else {
-                // Default to Restaurant
+                // Default to Store/Restaurant
                 return {
-                    id: restaurantOwner?.id || chatDetails?.restaurant?.owner_id,
-                    name: restaurant?.name || 'Restaurant',
+                    id: businessOwnerId,
+                    name: restaurant?.name || businessLabel,
                     avatar: restaurant?.image_url || restaurant?.logo_url,
                     subtitle: 'Order Support',
                     phone: restaurant?.phone || restaurantOwner?.phone_number,
-                    icon: 'restaurant' as const,
+                    icon: businessIcon as any,
                 };
             }
         }
@@ -435,8 +454,10 @@ export default function OrderChatScreen() {
     };
 
     const getSenderInfo = (senderId: string) => {
+        const businessFallbackName = isStoreContext ? 'Store' : 'Restaurant';
+        const businessRole = isStoreContext ? 'store' : 'restaurant';
         if (customer && senderId === customer.id) return { name: customer.first_name || 'Customer', avatar: customer.profile_picture_url, role: 'customer' };
-        if (restaurantOwner && senderId === restaurantOwner.id) return { name: restaurant?.name || 'Restaurant', avatar: restaurant?.image_url || restaurant?.logo_url, role: 'restaurant' };
+        if (restaurantOwner && senderId === restaurantOwner.id) return { name: restaurant?.name || businessFallbackName, avatar: restaurant?.image_url || restaurant?.logo_url, role: businessRole };
         if (rider && senderId === rider.id) return { name: rider.first_name || 'Rider', avatar: rider.profile_picture_url, role: 'rider' };
         return { name: 'User', avatar: null, role: 'customer' };
     };
@@ -465,11 +486,11 @@ export default function OrderChatScreen() {
                             {senderInfo?.avatar ? (
                                 <Image source={{ uri: senderInfo.avatar }} style={styles.smallAvatar} />
                             ) : (
-                                <View style={[styles.smallAvatar, { backgroundColor: senderInfo?.role === 'restaurant' ? primary + '30' : '#E5E7EB' }]}>
+                                <View style={[styles.smallAvatar, { backgroundColor: (senderInfo?.role === 'restaurant' || senderInfo?.role === 'store') ? primary + '30' : '#E5E7EB' }]}>
                                     <Ionicons
-                                        name={senderInfo?.role === 'restaurant' ? 'restaurant' : senderInfo?.role === 'rider' ? 'bicycle' : 'person'}
+                                        name={senderInfo?.role === 'store' ? 'storefront' : senderInfo?.role === 'restaurant' ? 'restaurant' : senderInfo?.role === 'rider' ? 'bicycle' : 'person'}
                                         size={12}
-                                        color={senderInfo?.role === 'restaurant' ? primary : '#6B7280'}
+                                        color={(senderInfo?.role === 'restaurant' || senderInfo?.role === 'store') ? primary : '#6B7280'}
                                     />
                                 </View>
                             )}
@@ -521,12 +542,12 @@ export default function OrderChatScreen() {
         <View style={styles.emptyContainer}>
             <GlitchLoader size={80} />
             <ThemedText style={[styles.emptyTitle, { color: textColor }]}>
-                {isRestaurantOwner ? 'Chat with Customer' : 'Chat with Restaurant'}
+                {isBusinessOwner ? 'Chat with Customer' : 'Chat with Order Team'}
             </ThemedText>
             <ThemedText style={[styles.emptySubtitle, { color: mutedText }]}>
-                {isRestaurantOwner
+                {isBusinessOwner
                     ? 'Respond to customer questions about their order'
-                    : 'Ask about your order or special requests'}
+                    : 'Ask about your order or delivery handoff'}
             </ThemedText>
         </View>
     );

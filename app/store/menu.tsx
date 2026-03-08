@@ -38,7 +38,6 @@ interface MenuItem {
     created_at: string;
 }
 
-const CATEGORIES = ['Grocery', 'Electronics', 'Fashion', 'Health & Beauty', 'Home & Office', 'Others'] as const;
 
 export default function StoreInventoryScreen() {
     const navigation = useNavigation();
@@ -51,6 +50,7 @@ export default function StoreInventoryScreen() {
 
     const [loading, setLoading] = useState(true);
     const [menuItems, setMenuItems] = useState<MenuItem[]>([]);
+    const [categories, setCategories] = useState<string[]>(['Grocery', 'Electronics', 'Others']); // Default fallback
     const [filteredItems, setFilteredItems] = useState<MenuItem[]>([]);
     const [storeId, setStoreId] = useState<string | null>(null);
     const [showModal, setShowModal] = useState(false);
@@ -66,13 +66,20 @@ export default function StoreInventoryScreen() {
     const [formData, setFormData] = useState({
         name: '',
         description: '',
-        category: 'Grocery' as string,
+        category: categories[0] || 'Grocery',
         price: '',
         options: '', // Changed from sides
         image_url: null as string | null,
         is_active: false,
         stock_quantity: '0', // New
     });
+
+    useEffect(() => {
+        // Update default form category if categories change
+        if (categories.length > 0 && formData.category === '') {
+            setFormData(prev => ({ ...prev, category: categories[0] }));
+        }
+    }, [categories]);
 
     // Theme colors
     const headerIconColor = useThemeColor({ light: '#1f2050', dark: '#fff' }, 'text');
@@ -85,7 +92,26 @@ export default function StoreInventoryScreen() {
 
     useEffect(() => {
         fetchRestaurantAndMenu();
+        fetchCategories();
     }, [user]);
+
+    const fetchCategories = async () => {
+        try {
+            const { data, error } = await supabase
+                .from('categories')
+                .select('name')
+                .eq('type', 'store')
+                .eq('is_active', true)
+                .order('sort_order', { ascending: true });
+
+            if (error) throw error;
+            if (data && data.length > 0) {
+                setCategories(data.map(c => c.name));
+            }
+        } catch (error) {
+            console.error('Error fetching categories:', error);
+        }
+    };
 
     useEffect(() => {
         filterItems();
@@ -188,7 +214,7 @@ export default function StoreInventoryScreen() {
         setFormData({
             name: '',
             description: '',
-            category: 'Grocery',
+            category: categories[0] || 'Grocery',
             price: '',
             options: '',
             image_url: null,
@@ -440,7 +466,7 @@ export default function StoreInventoryScreen() {
             <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.filterScrollView}>
                 <View style={styles.filterContainer}>
                     {/* Category Filters */}
-                    {CATEGORIES.map((cat) => (
+                    {categories.map((cat) => (
                         <TouchableOpacity
                             key={cat}
                             style={[
@@ -596,7 +622,7 @@ export default function StoreInventoryScreen() {
                             {/* Category */}
                             <ThemedText style={[styles.formLabel, { color: textColor }]}>Category *</ThemedText>
                             <View style={styles.categoryContainer}>
-                                {CATEGORIES.map((cat) => (
+                                {categories.map((cat) => (
                                     <TouchableOpacity
                                         key={cat}
                                         style={[

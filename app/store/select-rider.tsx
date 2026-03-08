@@ -66,6 +66,7 @@ export default function SelectRiderScreen() {
     const [accepting, setAccepting] = useState<string | null>(null);
     const [countdowns, setCountdowns] = useState<Record<string, number>>({});
     const countdownIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+    const assignedNoticeShownRef = useRef(false);
 
     const fetchData = async () => {
         if (!orderId) {
@@ -76,6 +77,34 @@ export default function SelectRiderScreen() {
 
         try {
             setLoading(true);
+
+            // If this order already has a rider assigned, stop countdown flow immediately.
+            const { data: orderData, error: orderError } = await supabase
+                .from('orders')
+                .select('id, rider_id')
+                .eq('id', orderId)
+                .maybeSingle();
+
+            if (orderError) {
+                console.error('Error fetching order assignment:', orderError);
+            }
+
+            if (orderData?.rider_id) {
+                setBids([]);
+                setInvites([]);
+                setExpiredInvites([]);
+                setAvailableRiders([]);
+                setCountdowns({});
+                setLoading(false);
+
+                if (!assignedNoticeShownRef.current) {
+                    assignedNoticeShownRef.current = true;
+                    Alert.alert('Rider Accepted', 'A rider has accepted this order.', [
+                        { text: 'OK', onPress: () => router.back() }
+                    ]);
+                }
+                return;
+            }
 
             // 1. Fetch Bids, Invites & Expired
             const { data: bidsData, error: bidsError } = await supabase
@@ -94,7 +123,7 @@ export default function SelectRiderScreen() {
                         status,
                         average_rating,
                         total_jobs,
-                        profile:profiles (
+                        profile:profiles!fk_riders_profiles (
                             first_name,
                             last_name,
                             phone_number
@@ -102,7 +131,7 @@ export default function SelectRiderScreen() {
                     )
                 `)
                 .eq('order_id', orderId)
-                .in('status', ['pending', 'invited', 'expired'])
+                .in('status', ['pending', 'invited', 'expired', 'accepted'])
                 .order('created_at', { ascending: true });
 
             if (bidsError) {
@@ -111,6 +140,26 @@ export default function SelectRiderScreen() {
             }
 
             const allBids = (bidsData as any) || [];
+
+            const acceptedBid = allBids.find((b: any) => b.status === 'accepted');
+            if (acceptedBid) {
+                setBids([]);
+                setInvites([]);
+                setExpiredInvites([]);
+                setAvailableRiders([]);
+                setCountdowns({});
+                setLoading(false);
+
+                if (!assignedNoticeShownRef.current) {
+                    assignedNoticeShownRef.current = true;
+                    const riderName = `${acceptedBid?.rider?.profile?.first_name || ''} ${acceptedBid?.rider?.profile?.last_name || ''}`.trim() || 'A rider';
+                    Alert.alert('Rider Accepted', `${riderName} accepted this order.`, [
+                        { text: 'OK', onPress: () => router.back() }
+                    ]);
+                }
+                return;
+            }
+
             // Separate pending bids from invites and expired
             setBids(allBids.filter((b: any) => b.status === 'pending'));
             setInvites(allBids.filter((b: any) => b.status === 'invited'));
@@ -136,7 +185,7 @@ export default function SelectRiderScreen() {
                     status,
                     average_rating,
                     total_jobs,
-                    profile:profiles (
+                    profile:profiles!fk_riders_profiles (
                        first_name,
                        last_name,
                        phone_number
@@ -162,10 +211,6 @@ export default function SelectRiderScreen() {
             setLoading(false);
         }
     };
-
-    if (loading) {
-        return <FoodLoader message="Finding riders..." type="store" />;
-    }
 
     // Handle invite expiry
     const handleExpiry = useCallback(async () => {
@@ -235,6 +280,10 @@ export default function SelectRiderScreen() {
     }, [handleExpiry]);
 
     useEffect(() => {
+        assignedNoticeShownRef.current = false;
+    }, [orderId]);
+
+    useEffect(() => {
         fetchData();
 
         const subscription = supabase
@@ -247,12 +296,24 @@ export default function SelectRiderScreen() {
             }, () => {
                 fetchData();
             })
+            .on('postgres_changes', {
+                event: 'UPDATE',
+                schema: 'public',
+                table: 'orders',
+                filter: `id=eq.${orderId}`
+            }, () => {
+                fetchData();
+            })
             .subscribe();
 
         return () => {
             supabase.removeChannel(subscription);
         };
     }, [orderId]);
+
+    if (loading) {
+        return <FoodLoader message="Finding riders..." type="store" />;
+    }
 
     const handleAcceptBid = async (riderUserId: string) => {
         setAccepting(riderUserId);
@@ -320,11 +381,11 @@ export default function SelectRiderScreen() {
         );
     };
 
-    const renderRiderCard = ({ item, type }: { item: Rider | RiderBid, type: 'bid' | 'invite' | 'available' }) => {
+    const renderRiderCard = ({ item, type }: { item: Rider | RiderBid, type: 'bid' | 'invite' | 'available' | 'expired' }) => {
         let rider: Rider;
         let riderUserId: string;
 
-        if (type === 'bid' || type === 'invite') {
+        if (type === 'bid' || type === 'invite' || type === 'expired') {
             rider = (item as RiderBid).rider;
             riderUserId = (item as RiderBid).rider_id;
         } else {
@@ -358,10 +419,23 @@ export default function SelectRiderScreen() {
             onPress = () => handleSendInvite(rider);
         } else if (type === 'invite') {
             const timeLeft = countdown !== undefined ? countdown : 0;
-            buttonText = timeLeft > 0 ? `Waiting... ${timeLeft}s` : "Expired ⏰";
-            buttonColor = timeLeft > 0 ? ['#f59e0b', '#d97706'] : ['#ef4444', '#dc2626'];
-            buttonIcon = timeLeft > 0 ? "time" : "close-circle";
-            isDisabled = true; // Still disabled here because this is the *active* invite row (which might just have ticked to 0)
+            if (timeLeft > 0) {
+                buttonText = `Waiting... ${timeLeft}s`;
+                buttonColor = ['#f59e0b', '#d97706'];
+                buttonIcon = "time";
+                isDisabled = true;
+            } else {
+                // Timer expired — allow re-invite
+                buttonText = "Re-invite";
+                buttonColor = ['#3b82f6', '#2563eb'];
+                buttonIcon = "refresh";
+                isDisabled = false;
+                onPress = async () => {
+                    // Expire the old invite first, then re-send
+                    await supabase.rpc('expire_stale_invites', { p_order_id: orderId });
+                    handleSendInvite(rider);
+                };
+            }
         } else {
             buttonText = "Send Request";
             buttonColor = ['#3b82f6', '#2563eb'];
@@ -568,7 +642,7 @@ export default function SelectRiderScreen() {
                                 </ThemedText>
                                 {expiredInvites.map(invite => (
                                     <View key={invite.id} style={{ marginBottom: 16, opacity: 0.6 }}>
-                                        {renderRiderCard({ item: invite, type: 'expired' as any })}
+                                        {renderRiderCard({ item: invite, type: 'expired' })}
                                     </View>
                                 ))}
                             </View>

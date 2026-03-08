@@ -236,7 +236,12 @@ const NearbyDishes: React.FC<NearbyDishesProps> = ({
         return (
             <DishShelf
                 data={displayedDishes}
-                onAddToCart={(dish: any) => addToCart({ ...dish, dishId: dish.id })}
+                onAddToCart={(dish: any) => addToCart({
+                    ...dish,
+                    itemId: dish.id,
+                    type: 'food',
+                    quantity: 1,
+                })}
                 isInCart={(id: string) => isInCart(id)}
                 themeColors={themeColors}
             />
@@ -267,7 +272,12 @@ const NearbyDishes: React.FC<NearbyDishesProps> = ({
             renderItem={({ item }) => (
                 <DishCard
                     item={item}
-                    onAdd={(dish: any) => addToCart({ ...dish, dishId: dish.id })}
+                    onAdd={(dish: any) => addToCart({
+                        ...dish,
+                        itemId: dish.id,
+                        type: 'food',
+                        quantity: 1,
+                    })}
                     inCart={isInCart(item.id)}
                     themeColors={themeColors}
                     isGrid={true}

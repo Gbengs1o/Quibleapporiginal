@@ -76,8 +76,31 @@ export default function OrdersScreen() {
     }
   }, [activeTab, user]);
 
-  const fetchDeliveryRequests = async () => {
-    setLoadingLogistics(true);
+  useEffect(() => {
+    if (activeTab !== 'logistics' || !user?.id) return;
+
+    const deliveryRequestsSub = supabase
+      .channel(`user_delivery_requests:${user.id}`)
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'delivery_requests', filter: `user_id=eq.${user.id}` },
+        () => fetchDeliveryRequests({ silent: true })
+      )
+      .subscribe();
+
+    const poll = setInterval(() => {
+      fetchDeliveryRequests({ silent: true });
+    }, 5000);
+
+    return () => {
+      supabase.removeChannel(deliveryRequestsSub);
+      clearInterval(poll);
+    };
+  }, [activeTab, user?.id]);
+
+  const fetchDeliveryRequests = async (options?: { silent?: boolean }) => {
+    const silent = options?.silent === true;
+    if (!silent) setLoadingLogistics(true);
     try {
       const { data, error } = await supabase
         .from('delivery_requests')
@@ -90,7 +113,7 @@ export default function OrdersScreen() {
     } catch (error) {
       console.error(error);
     } finally {
-      setLoadingLogistics(false);
+      if (!silent) setLoadingLogistics(false);
     }
   };
 
@@ -373,7 +396,7 @@ export default function OrdersScreen() {
   return (
     <ThemedView style={[styles.container, { backgroundColor: colors.bg }]}>
       {/* Header */}
-      <View style={[styles.header, { paddingTop: insets.top + 100 }]}>
+      <View style={[styles.header, { paddingTop: insets.top + 20 }]}>
         <View style={styles.headerTextContainer}>
           <ThemedText style={[styles.pageTitle, { color: isDark ? '#FFFFFF' : '#1F2050' }]}>My Orders</ThemedText>
           <ThemedText style={[styles.pageSubtitle, { color: colors.textSecondary }]}>
@@ -567,7 +590,6 @@ const styles = StyleSheet.create({
     paddingHorizontal: 20,
     paddingBottom: 20,
     position: 'relative',
-    overflow: 'hidden',
   },
   headerTextContainer: {
     zIndex: 2,
@@ -582,6 +604,7 @@ const styles = StyleSheet.create({
     fontSize: 32,
     fontWeight: '800',
     letterSpacing: -0.5,
+    lineHeight: 40,
   },
   pageSubtitle: {
     fontSize: 15,

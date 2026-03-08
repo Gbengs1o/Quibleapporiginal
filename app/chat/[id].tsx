@@ -3,6 +3,7 @@ import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import TypingIndicator from '@/components/TypingIndicator';
 import { useAuth } from '@/contexts/auth';
+import { useCall } from '@/contexts/call-context';
 import { useRiderNotifications } from '@/contexts/rider-notifications';
 import { useThemeColor } from '@/hooks/use-theme-color';
 import { uploadToCloudinary } from '@/utils/cloudinary';
@@ -11,6 +12,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { Audio } from 'expo-av';
 import * as ImagePicker from 'expo-image-picker';
 import { LinearGradient } from 'expo-linear-gradient';
+import * as Linking from 'expo-linking';
 import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
 import React, { useEffect, useRef, useState } from 'react';
 import {
@@ -33,9 +35,11 @@ import {
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 
 export default function ChatScreen() {
-    const { id: chatId } = useLocalSearchParams();
+    const { id } = useLocalSearchParams<{ id: string | string[] }>();
+    const chatId = Array.isArray(id) ? id[0] : id;
     const router = useRouter();
     const { user } = useAuth();
+    const { startCall } = useCall();
     const [messages, setMessages] = useState<any[]>([]);
     const [inputText, setInputText] = useState('');
     const [loading, setLoading] = useState(true);
@@ -51,6 +55,7 @@ export default function ChatScreen() {
     const [viewingMedia, setViewingMedia] = useState<any | null>(null);
     const [otherUserTyping, setOtherUserTyping] = useState(false);
     const typingTimeout = useRef<NodeJS.Timeout | null>(null);
+    const typingChannelRef = useRef<any>(null);
 
     // Voice Preview State
     const [voicePreviewUri, setVoicePreviewUri] = useState<string | null>(null);
@@ -79,6 +84,8 @@ export default function ChatScreen() {
     const { refreshNotifications } = useRiderNotifications();
 
     useEffect(() => {
+        if (!chatId || !user?.id) return;
+
         fetchChatDetails();
         fetchMessages();
         startEntranceAnimations();
@@ -103,6 +110,7 @@ export default function ChatScreen() {
 
         // 2. Listen for typing status (Broadcast)
         const typingChannel = supabase.channel(`chat_typing:${chatId}`);
+        typingChannelRef.current = typingChannel;
         typingChannel
             .on('broadcast', { event: 'typing' }, ({ payload }) => {
                 if (payload.userId !== user?.id) {
@@ -115,14 +123,17 @@ export default function ChatScreen() {
 
         return () => {
             supabase.removeChannel(messageSub);
-            supabase.removeChannel(typingChannel);
+            if (typingChannelRef.current) {
+                supabase.removeChannel(typingChannelRef.current);
+                typingChannelRef.current = null;
+            }
             if (typingTimeout.current) clearTimeout(typingTimeout.current);
             refreshNotifications(); // Refresh on exit just in case
         };
-    }, [chatId]);
+    }, [chatId, user?.id]);
 
     const markAsRead = async () => {
-        if (!user?.id) return;
+        if (!user?.id || !chatId) return;
         try {
             await supabase
                 .from('messages')
@@ -157,29 +168,42 @@ export default function ChatScreen() {
     };
 
     const fetchChatDetails = async () => {
+        if (!chatId || !user?.id) return;
         try {
-            const { data: chat } = await supabase
+            const { data: chat, error: chatError } = await supabase
                 .from('chats')
-                .select('*, rider:riders(*, profile:profiles(*)), customer:profiles(*)')
+                .select('id, user_id, rider_id')
                 .eq('id', chatId)
                 .single();
 
+            if (chatError || !chat) throw chatError;
+
+            const isCustomer = chat.user_id === user.id;
+            const partnerId = isCustomer ? chat.rider_id : chat.user_id;
+            if (!partnerId) return;
+
+            const [{ data: profile }, { data: riderInfo }] = await Promise.all([
+                supabase
+                    .from('profiles')
+                    .select('id, first_name, last_name, profile_picture_url, phone_number')
+                    .eq('id', partnerId)
+                    .maybeSingle(),
+                supabase
+                    .from('riders')
+                    .select('user_id, is_online, rider_photo')
+                    .eq('user_id', partnerId)
+                    .maybeSingle()
+            ]);
+
+            const fullName = `${profile?.first_name || ''} ${profile?.last_name || ''}`.trim();
             if (chat) {
-                // Determine who the chat partner is
-                const isCustomer = chat.customer_id === user?.id;
-                if (isCustomer && chat.rider?.profile) {
-                    setChatPartner({
-                        name: `${chat.rider.profile.first_name} ${chat.rider.profile.last_name}`,
-                        avatar: chat.rider.profile.profile_picture_url || chat.rider.rider_photo,
-                        isOnline: chat.rider.is_online
-                    });
-                } else if (chat.customer) {
-                    setChatPartner({
-                        name: `${chat.customer.first_name} ${chat.customer.last_name}`,
-                        avatar: chat.customer.profile_picture_url,
-                        isOnline: true // Assume customer is online during chat
-                    });
-                }
+                setChatPartner({
+                    id: partnerId,
+                    name: fullName || (isCustomer ? 'Rider' : 'Customer'),
+                    avatar: profile?.profile_picture_url || riderInfo?.rider_photo || null,
+                    isOnline: !!riderInfo?.is_online,
+                    phone: profile?.phone_number || null
+                });
             }
         } catch (e) {
             console.log('Error fetching chat details', e);
@@ -187,6 +211,7 @@ export default function ChatScreen() {
     };
 
     const fetchMessages = async () => {
+        if (!chatId) return;
         try {
             const { data, error } = await supabase
                 .from('messages')
@@ -205,8 +230,8 @@ export default function ChatScreen() {
 
     const handleInputText = (text: string) => {
         setInputText(text);
-        if (text.length > 0) {
-            supabase.channel(`chat_typing:${chatId}`).send({
+        if (text.length > 0 && typingChannelRef.current) {
+            typingChannelRef.current.send({
                 type: 'broadcast',
                 event: 'typing',
                 payload: { userId: user?.id }
@@ -303,10 +328,28 @@ export default function ChatScreen() {
     // Options Menu Actions
     const handleCallPartner = () => {
         setShowOptionsMenu(false);
-        // Navigate to call or show phone
-        Alert.alert('Call', `Would you like to call ${chatPartner?.name}?`, [
+        Alert.alert('Call', `Contact ${chatPartner?.name || 'Partner'}`, [
             { text: 'Cancel', style: 'cancel' },
-            { text: 'Call', onPress: () => console.log('Calling...') }
+            {
+                text: 'Phone',
+                onPress: () => {
+                    if (chatPartner?.phone) {
+                        Linking.openURL(`tel:${chatPartner.phone}`);
+                    } else {
+                        Alert.alert('No Phone', 'Phone number is not available for this user.');
+                    }
+                }
+            },
+            {
+                text: 'In-App',
+                onPress: () => {
+                    if (chatPartner?.id) {
+                        startCall(chatPartner.id);
+                    } else {
+                        Alert.alert('Unavailable', 'Cannot start in-app call for this chat.');
+                    }
+                }
+            }
         ]);
     };
 
@@ -341,6 +384,7 @@ export default function ChatScreen() {
 
     // --- Send Logic ---
     const sendMediaMessage = async (uri: string, type: 'image' | 'audio') => {
+        if (!chatId) return;
         setSending(true);
         try {
             const cloudUrl = await uploadToCloudinary(uri, type);
@@ -373,7 +417,7 @@ export default function ChatScreen() {
     };
 
     const sendTextMessage = async () => {
-        if (!inputText.trim() || sending) return;
+        if (!chatId || !inputText.trim() || sending) return;
         setSending(true);
         try {
             const content = inputText.trim();

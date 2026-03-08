@@ -6,6 +6,7 @@ interface RiderNotificationsContextType {
     unreadMessages: number;
     pendingDeliveries: number;
     pendingFoodInvites: number;
+    activeOrders: number;
     unreadAlerts: number;
     refreshNotifications: () => Promise<void>;
 }
@@ -14,6 +15,7 @@ const RiderNotificationsContext = createContext<RiderNotificationsContextType>({
     unreadMessages: 0,
     pendingDeliveries: 0,
     pendingFoodInvites: 0,
+    activeOrders: 0,
     unreadAlerts: 0,
     refreshNotifications: async () => { },
 });
@@ -23,6 +25,7 @@ export const RiderNotificationsProvider = ({ children }: { children: React.React
     const [unreadMessages, setUnreadMessages] = useState(0);
     const [pendingDeliveries, setPendingDeliveries] = useState(0);
     const [pendingFoodInvites, setPendingFoodInvites] = useState(0);
+    const [activeOrders, setActiveOrders] = useState(0);
     const [unreadAlerts, setUnreadAlerts] = useState(0);
 
     const refreshNotifications = useCallback(async () => {
@@ -75,7 +78,8 @@ export const RiderNotificationsProvider = ({ children }: { children: React.React
             const { count: delCount } = await supabase
                 .from('delivery_requests')
                 .select('*', { count: 'exact', head: true })
-                .eq('status', 'pending');
+                .eq('status', 'pending')
+                .or(`rider_id.is.null,rider_id.eq.${session.user.id}`);
             setPendingDeliveries(delCount || 0);
 
             // 3. Pending Food Invites (from restaurants) — only count non-expired
@@ -87,7 +91,23 @@ export const RiderNotificationsProvider = ({ children }: { children: React.React
                 .or(`expired_at.is.null,expired_at.gt.${new Date().toISOString()}`);
             setPendingFoodInvites(foodInviteCount || 0);
 
-            // 4. Unread Alerts (Notifications table)
+            // 4. Active assigned food/store orders
+            const { count: activeFoodOrderCount } = await supabase
+                .from('orders')
+                .select('*', { count: 'exact', head: true })
+                .eq('rider_id', session.user.id)
+                .in('status', ['ready', 'with_rider', 'out_for_delivery']);
+
+            // 4b. Active logistics (package/ride) jobs
+            const { count: activeLogisticsCount } = await supabase
+                .from('delivery_requests')
+                .select('*', { count: 'exact', head: true })
+                .eq('rider_id', session.user.id)
+                .in('status', ['accepted', 'picked_up']);
+
+            setActiveOrders((activeFoodOrderCount || 0) + (activeLogisticsCount || 0));
+
+            // 5. Unread Alerts (Notifications table)
             const { count: notifCount } = await supabase
                 .from('notifications')
                 .select('*', { count: 'exact', head: true })
@@ -109,6 +129,7 @@ export const RiderNotificationsProvider = ({ children }: { children: React.React
         const channel = supabase.channel('rider-global-notifications')
             .on('postgres_changes', { event: '*', schema: 'public', table: 'delivery_requests' }, () => refreshNotifications())
             .on('postgres_changes', { event: '*', schema: 'public', table: 'order_rider_bids' }, () => refreshNotifications())
+            .on('postgres_changes', { event: '*', schema: 'public', table: 'orders' }, () => refreshNotifications())
             .on('postgres_changes', { event: '*', schema: 'public', table: 'chats' }, () => refreshNotifications())
             .on('postgres_changes', { event: '*', schema: 'public', table: 'order_chats' }, () => refreshNotifications())
             .on('postgres_changes', { event: '*', schema: 'public', table: 'order_chat_messages' }, () => refreshNotifications())
@@ -126,6 +147,7 @@ export const RiderNotificationsProvider = ({ children }: { children: React.React
             unreadMessages,
             pendingDeliveries,
             pendingFoodInvites,
+            activeOrders,
             unreadAlerts,
             refreshNotifications
         }}>

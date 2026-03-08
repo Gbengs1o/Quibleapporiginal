@@ -64,10 +64,39 @@ export default function SelectRiderScreen() {
     const [accepting, setAccepting] = useState<string | null>(null);
     const [countdowns, setCountdowns] = useState<Record<string, number>>({});
     const countdownIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+    const assignedNoticeShownRef = useRef(false);
 
     const fetchData = async () => {
         if (!orderId) return;
         setLoading(true);
+
+        // If this order already has a rider assigned, stop countdown flow immediately.
+        const { data: orderData, error: orderError } = await supabase
+            .from('orders')
+            .select('id, rider_id')
+            .eq('id', orderId)
+            .maybeSingle();
+
+        if (orderError) {
+            console.error('Error fetching order assignment:', orderError);
+        }
+
+        if (orderData?.rider_id) {
+            setBids([]);
+            setInvites([]);
+            setExpiredInvites([]);
+            setAvailableRiders([]);
+            setCountdowns({});
+            setLoading(false);
+
+            if (!assignedNoticeShownRef.current) {
+                assignedNoticeShownRef.current = true;
+                Alert.alert('Rider Accepted', 'A rider has accepted this order.', [
+                    { text: 'OK', onPress: () => router.back() }
+                ]);
+            }
+            return;
+        }
 
         // 1. Fetch Bids, Invites & Expired
         const { data: bidsData, error: bidsError } = await supabase
@@ -94,7 +123,7 @@ export default function SelectRiderScreen() {
                 )
             `)
             .eq('order_id', orderId)
-            .in('status', ['pending', 'invited', 'expired'])
+            .in('status', ['pending', 'invited', 'expired', 'accepted'])
             .order('created_at', { ascending: true });
 
         if (bidsError) {
@@ -102,6 +131,26 @@ export default function SelectRiderScreen() {
         }
 
         const allBids = (bidsData as any) || [];
+
+        const acceptedBid = allBids.find((b: any) => b.status === 'accepted');
+        if (acceptedBid) {
+            setBids([]);
+            setInvites([]);
+            setExpiredInvites([]);
+            setAvailableRiders([]);
+            setCountdowns({});
+            setLoading(false);
+
+            if (!assignedNoticeShownRef.current) {
+                assignedNoticeShownRef.current = true;
+                const riderName = `${acceptedBid?.rider?.profile?.first_name || ''} ${acceptedBid?.rider?.profile?.last_name || ''}`.trim() || 'A rider';
+                Alert.alert('Rider Accepted', `${riderName} accepted this order.`, [
+                    { text: 'OK', onPress: () => router.back() }
+                ]);
+            }
+            return;
+        }
+
         // Separate pending bids from invites and expired
         setBids(allBids.filter((b: any) => b.status === 'pending'));
         setInvites(allBids.filter((b: any) => b.status === 'invited'));
@@ -216,6 +265,10 @@ export default function SelectRiderScreen() {
     }, [handleExpiry]);
 
     useEffect(() => {
+        assignedNoticeShownRef.current = false;
+    }, [orderId]);
+
+    useEffect(() => {
         fetchData();
 
         const subscription = supabase
@@ -225,6 +278,14 @@ export default function SelectRiderScreen() {
                 schema: 'public',
                 table: 'order_rider_bids',
                 filter: `order_id=eq.${orderId}`
+            }, () => {
+                fetchData();
+            })
+            .on('postgres_changes', {
+                event: 'UPDATE',
+                schema: 'public',
+                table: 'orders',
+                filter: `id=eq.${orderId}`
             }, () => {
                 fetchData();
             })
@@ -301,11 +362,11 @@ export default function SelectRiderScreen() {
         );
     };
 
-    const renderRiderCard = ({ item, type }: { item: Rider | RiderBid, type: 'bid' | 'invite' | 'available' }) => {
+    const renderRiderCard = ({ item, type }: { item: Rider | RiderBid, type: 'bid' | 'invite' | 'available' | 'expired' }) => {
         let rider: Rider;
         let riderUserId: string;
 
-        if (type === 'bid' || type === 'invite') {
+        if (type === 'bid' || type === 'invite' || type === 'expired') {
             rider = (item as RiderBid).rider;
             riderUserId = (item as RiderBid).rider_id;
         } else {
@@ -549,7 +610,7 @@ export default function SelectRiderScreen() {
                                 </ThemedText>
                                 {expiredInvites.map(invite => (
                                     <View key={invite.id} style={{ marginBottom: 16, opacity: 0.6 }}>
-                                        {renderRiderCard({ item: invite, type: 'expired' as any })}
+                                        {renderRiderCard({ item: invite, type: 'expired' })}
                                     </View>
                                 ))}
                             </View>

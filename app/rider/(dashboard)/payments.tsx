@@ -100,87 +100,54 @@ export default function RiderPaymentsPage() {
     const [refreshing, setRefreshing] = useState(false);
 
     useEffect(() => {
-        if (session?.user.id && riderWallet?.rider_id) {
+        if (session?.user.id && riderWallet?.id) {
             fetchData();
         }
-    }, [session?.user.id, riderWallet?.rider_id]);
+    }, [session?.user.id, riderWallet?.id]);
 
     const fetchData = async () => {
         setLoading(true);
         try {
             await refreshWallet();
 
-            if (!riderWallet?.rider_id) return;
+            if (!session?.user.id || !riderWallet?.id) return;
 
-            // 1. Today's Earnings
+            // Use rider wallet ledger so food/store + logistics earnings are all reflected.
             const startOfDay = new Date();
             startOfDay.setHours(0, 0, 0, 0);
-            const { data: todayJobs } = await supabase
-                .from('delivery_requests')
-                .select('final_price')
-                .eq('rider_id', riderWallet.rider_id)
-                .eq('status', 'delivered')
-                .gte('updated_at', startOfDay.toISOString());
 
-            if (todayJobs) {
-                const sum = todayJobs.reduce((acc, job) => acc + (Number(job.final_price) || 0), 0);
-                setTodaysEarnings(sum);
-            }
-
-            // 2. Weekly Earnings (Last 7 Days)
             const startOfWeek = new Date();
-            startOfWeek.setDate(startOfWeek.getDate() - 7); // Rolling 7 days
+            startOfWeek.setDate(startOfWeek.getDate() - 7);
             startOfWeek.setHours(0, 0, 0, 0);
 
-            const { data: weekJobs } = await supabase
-                .from('delivery_requests')
-                .select('final_price')
-                .eq('rider_id', riderWallet.rider_id)
-                .eq('status', 'delivered')
-                .gte('updated_at', startOfWeek.toISOString());
+            const { data: dayCredits } = await supabase
+                .from('transactions')
+                .select('amount')
+                .eq('wallet_id', riderWallet.id)
+                .eq('type', 'credit')
+                .gte('created_at', startOfDay.toISOString());
+            setTodaysEarnings((dayCredits || []).reduce((acc: number, tx: any) => acc + (Number(tx.amount) || 0), 0));
 
-            if (weekJobs) {
-                const sum = weekJobs.reduce((acc, job) => acc + (Number(job.final_price) || 0), 0);
-                setWeeklyEarnings(sum);
-            }
+            const { data: weekCredits } = await supabase
+                .from('transactions')
+                .select('amount')
+                .eq('wallet_id', riderWallet.id)
+                .eq('type', 'credit')
+                .gte('created_at', startOfWeek.toISOString());
+            setWeeklyEarnings((weekCredits || []).reduce((acc: number, tx: any) => acc + (Number(tx.amount) || 0), 0));
 
-            // 3. Pending Payouts & Recent Activity
-            // Fetch recent wallet transactions (both credits and debits if possible, but for now focusing on withdrawals and earnings)
-
-            // Fetch recent earnings
-            const { data: earnings } = await supabase
-                .from('delivery_requests')
-                .select('id, final_price, status, updated_at')
-                .eq('rider_id', riderWallet.rider_id)
-                .in('status', ['delivered'])
-                .order('updated_at', { ascending: false })
-                .limit(10);
-
-            // Fetch recent withdrawals (debits)
-            const { data: withdrawals } = await supabase
+            const { data: txns } = await supabase
                 .from('transactions')
                 .select('*')
-                .eq('wallet_id', riderWallet?.id)
-                .eq('type', 'debit')
+                .eq('wallet_id', riderWallet.id)
                 .order('created_at', { ascending: false })
-                .limit(10);
+                .limit(20);
 
-            // Calculate pending payouts
-            if (withdrawals) {
-                const pendingSum = withdrawals
-                    .filter((w: any) => w.status === 'pending')
-                    .reduce((acc, w) => acc + (Number(w.amount) || 0), 0);
-                setPendingPayouts(pendingSum);
-            }
-
-            // Merge and sort transactions for the list
-            const combined = [
-                ...(earnings?.map(e => ({ ...e, type: 'credit', description: `Order #${e.id.substring(0, 5).toUpperCase()}` })) || []),
-                ...(withdrawals?.map(w => ({ ...w, type: 'debit', description: 'Withdrawal Request' })) || [])
-            ].sort((a, b) => new Date(b.created_at || b.updated_at).getTime() - new Date(a.created_at || a.updated_at).getTime())
-                .slice(0, 20);
-
-            setRecentTransactions(combined);
+            const pendingSum = (txns || [])
+                .filter((t: any) => t.type === 'debit' && t.status === 'pending')
+                .reduce((acc: number, t: any) => acc + (Number(t.amount) || 0), 0);
+            setPendingPayouts(pendingSum);
+            setRecentTransactions(txns || []);
 
         } catch (e) {
             console.error(e);

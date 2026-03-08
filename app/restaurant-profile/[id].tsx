@@ -57,7 +57,7 @@ export default function RestaurantProfileScreen() {
     const { id } = useLocalSearchParams();
     const router = useRouter();
     const { user } = useAuth();
-    const { addToCart, isInCart, cart } = useCart();
+    const { addToCart, isInCart } = useCart();
     const [restaurant, setRestaurant] = useState<Restaurant | null>(null);
     const [menu, setMenu] = useState<MenuItem[]>([]);
     const [loading, setLoading] = useState(true);
@@ -417,11 +417,21 @@ export default function RestaurantProfileScreen() {
                                                     if (!inCart) {
                                                         Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
                                                         addToCart({
-                                                            id: item.id, name: item.name, price: item.price,
+                                                            itemId: item.id,
+                                                            type: 'food',
+                                                            name: item.name,
+                                                            description: item.description || '',
+                                                            price: item.price,
+                                                            quantity: 1,
                                                             image_url: item.image_url,
-                                                            restaurant: { id: restaurant.id, name: restaurant.name },
-                                                            dishId: item.id
-                                                        } as any);
+                                                            restaurant: {
+                                                                id: restaurant.id,
+                                                                name: restaurant.name,
+                                                                logo_url: restaurant.logo_url,
+                                                                latitude: restaurant.latitude,
+                                                                longitude: restaurant.longitude
+                                                            }
+                                                        });
                                                     }
                                                 }}
                                             >

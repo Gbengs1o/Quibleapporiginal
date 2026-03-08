@@ -30,6 +30,7 @@ interface OrderDetails {
     pickup_longitude: number;
     dropoff_latitude: number;
     dropoff_longitude: number;
+    orderSource: 'restaurant' | 'store';
     restaurant: {
         name: string;
         address: string;
@@ -122,6 +123,7 @@ export default function JobPreviewScreen() {
                 pickup_longitude: orderData.the_pickup_longitude || orderData.the_restaurant_longitude,
                 dropoff_latitude: orderData.the_dropoff_latitude,
                 dropoff_longitude: orderData.the_dropoff_longitude,
+                orderSource: orderData.the_order_source || 'restaurant',
                 restaurant: {
                     name: orderData.the_restaurant_name,
                     address: orderData.the_restaurant_address,
@@ -315,7 +317,7 @@ export default function JobPreviewScreen() {
                         {restLat !== 0 && restLng !== 0 && (
                             <Marker coordinate={{ latitude: restLat, longitude: restLng }}>
                                 <View style={[styles.markerContainer, { backgroundColor: '#F27C22' }]}>
-                                    <Ionicons name="restaurant" size={20} color="#fff" />
+                                    <Ionicons name={orderDetails?.orderSource === 'store' ? 'storefront' : 'restaurant'} size={20} color="#fff" />
                                 </View>
                             </Marker>
                         )}
@@ -356,7 +358,7 @@ export default function JobPreviewScreen() {
                 <View style={[styles.infoCard, { backgroundColor: cardBg }]}>
                     <View style={styles.priceRow}>
                         <ThemedText style={styles.restaurantName}>
-                            {orderDetails?.restaurant?.name || 'Restaurant'}
+                            {orderDetails?.restaurant?.name || (orderDetails?.orderSource === 'store' ? 'Store' : 'Restaurant')}
                         </ThemedText>
                         <ThemedText style={styles.priceTag}>₦{amount || orderDetails?.delivery_fee || 0}</ThemedText>
                     </View>
@@ -371,7 +373,7 @@ export default function JobPreviewScreen() {
                         <View style={[styles.iconCircle, { backgroundColor: 'rgba(59, 130, 246, 0.1)' }]}>
                             <Ionicons name="bicycle" size={20} color="#3B82F6" />
                         </View>
-                        <ThemedText style={[styles.statLabel, { color: subtleColor }]}>To Restaurant</ThemedText>
+                        <ThemedText style={[styles.statLabel, { color: subtleColor }]}>{orderDetails?.orderSource === 'store' ? 'To Store' : 'To Restaurant'}</ThemedText>
                         <ThemedText style={styles.statValue}>{distances.riderToRestaurant.toFixed(1)} km</ThemedText>
                         <ThemedText style={[styles.statEta, { color: subtleColor }]}>~{etaMinutes.toRestaurant} min</ThemedText>
                     </View>
@@ -417,7 +419,7 @@ export default function JobPreviewScreen() {
                     </View>
                     <View style={styles.legendRow}>
                         <View style={[styles.legendDot, { backgroundColor: '#F27C22' }]} />
-                        <ThemedText style={[styles.legendText, { color: subtleColor }]}>Restaurant (Pickup)</ThemedText>
+                        <ThemedText style={[styles.legendText, { color: subtleColor }]}>{orderDetails?.orderSource === 'store' ? 'Store (Pickup)' : 'Restaurant (Pickup)'}</ThemedText>
                     </View>
                     <View style={styles.legendRow}>
                         <View style={[styles.legendDot, { backgroundColor: '#22C55E' }]} />

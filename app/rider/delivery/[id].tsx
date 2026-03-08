@@ -2,6 +2,7 @@ import RiderLoader from '@/components/RiderLoader';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { useAuth } from '@/contexts/auth';
+import { useWallet } from '@/contexts/wallet';
 import { useThemeColor } from '@/hooks/use-theme-color';
 import { supabase } from '@/utils/supabase';
 import { Ionicons } from '@expo/vector-icons';
@@ -60,6 +61,7 @@ export default function ActiveDeliveryScreen() {
     const { id } = useLocalSearchParams();
     const router = useRouter();
     const { user } = useAuth();
+    const { refreshWallet } = useWallet();
     const colorScheme = useColorScheme();
     const isDark = colorScheme === 'dark';
     const mapRef = useRef<MapView>(null);
@@ -92,15 +94,23 @@ export default function ActiveDeliveryScreen() {
     const [rating, setRating] = useState(0);
     const [reviewComment, setReviewComment] = useState('');
     const [submittingReview, setSubmittingReview] = useState(false);
+    const [reviewId, setReviewId] = useState<string | null>(null);
+    const [hasRatedCustomer, setHasRatedCustomer] = useState(false);
 
     const [deliveryCode, setDeliveryCode] = useState('');
     const [codeInputModalVisible, setCodeInputModalVisible] = useState(false);
     const [isFoodOrder, setIsFoodOrder] = useState(false);
 
-    // Restaurant state
+    // Restaurant/Store state
     const [restaurantInfo, setRestaurantInfo] = useState<any>(null);
     const [restaurantOwnerPhone, setRestaurantOwnerPhone] = useState<string | null>(null);
     const [chatLoading, setChatLoading] = useState(false);
+    const [isStoreOrder, setIsStoreOrder] = useState(false);
+
+    const shouldHeadToPickup = (status?: string) => {
+        if (!status) return false;
+        return isFoodOrder ? status === 'ready' : status === 'accepted';
+    };
 
     const confirmDelivery = async () => {
         setLoading(true);
@@ -112,12 +122,12 @@ export default function ActiveDeliveryScreen() {
 
         const rpcName = isFoodOrder ? 'complete_food_delivery' : 'complete_delivery_job_v2';
         const idParam = isFoodOrder ? { p_order_id: id } : { p_request_id: id };
-
-        const { data, error } = await supabase.rpc(rpcName, {
+        const payload = {
             ...idParam,
-            p_delivery_code: deliveryCode,
-            ...locationArgs
-        });
+            ...locationArgs,
+            ...(isFoodOrder ? { p_delivery_code: deliveryCode } : {})
+        };
+        const { data, error } = await supabase.rpc(rpcName, payload);
 
         if (error || (data && !data.success)) {
             const errorMessage = data?.message || error?.message || 'Could not complete delivery.';
@@ -126,7 +136,10 @@ export default function ActiveDeliveryScreen() {
             return;
         }
 
-        setCodeInputModalVisible(false);
+        await refreshWallet();
+        if (isFoodOrder) {
+            setCodeInputModalVisible(false);
+        }
         setReviewModalVisible(true);
         setLoading(false);
     };
@@ -155,7 +168,7 @@ export default function ActiveDeliveryScreen() {
             // Try fetching from orders (Food)
             const { data: orderData, error: orderError } = await supabase
                 .from('orders')
-                .select('*, restaurant:restaurants(*)')
+                .select('*, restaurant:restaurants(*), store:stores(*)')
                 .eq('id', id)
                 .maybeSingle();
 
@@ -166,16 +179,21 @@ export default function ActiveDeliveryScreen() {
 
             setIsFoodOrder(true);
 
-            // Store restaurant info for the map callout and contact section
-            if (orderData.restaurant) {
-                setRestaurantInfo(orderData.restaurant);
+            // Determine if this is a store order
+            const orderIsStore = !!orderData.store_id;
+            setIsStoreOrder(orderIsStore);
 
-                // Fetch restaurant owner's phone from profiles
-                if (orderData.restaurant.owner_id) {
+            // Store restaurant/store info for display and callout
+            const sourceData = orderIsStore ? orderData.store : orderData.restaurant;
+            if (sourceData) {
+                setRestaurantInfo(sourceData);
+
+                // Fetch owner's phone from profiles
+                if (sourceData.owner_id) {
                     const { data: ownerData } = await supabase
                         .from('profiles')
                         .select('phone_number')
-                        .eq('id', orderData.restaurant.owner_id)
+                        .eq('id', sourceData.owner_id)
                         .single();
                     if (ownerData?.phone_number) {
                         setRestaurantOwnerPhone(ownerData.phone_number);
@@ -183,13 +201,15 @@ export default function ActiveDeliveryScreen() {
                 }
             }
 
+            const sourceName = sourceData?.name || (orderIsStore ? 'Store' : 'Restaurant');
+
             requestData = {
                 ...orderData,
                 pickup_latitude: orderData.pickup_latitude,
                 pickup_longitude: orderData.pickup_longitude,
                 dropoff_latitude: orderData.dropoff_latitude,
                 dropoff_longitude: orderData.dropoff_longitude,
-                item_description: `Order from ${orderData.restaurant?.name || 'Restaurant'}`,
+                item_description: `Order from ${sourceName}`,
                 final_price: orderData.delivery_fee,
                 customer_name: 'Customer',
             };
@@ -203,6 +223,25 @@ export default function ActiveDeliveryScreen() {
                 .eq('id', requestData.user_id)
                 .single();
             userProfile = userData;
+        }
+
+        if (user?.id && requestData?.id) {
+            const { data: existingReviews, error: reviewError } = await supabase
+                .from('reviews')
+                .select('id')
+                .eq('request_id', requestData.id)
+                .eq('reviewer_id', user.id)
+                .eq('role', 'rider')
+                .order('created_at', { ascending: false })
+                .limit(1);
+
+            if (reviewError) {
+                console.log('Failed to fetch existing rider review', reviewError);
+            } else {
+                const existingReview = existingReviews?.[0];
+                setReviewId(existingReview?.id || null);
+                setHasRatedCustomer(!!existingReview);
+            }
         }
 
         setRequest({ ...requestData, user: userProfile });
@@ -241,8 +280,9 @@ export default function ActiveDeliveryScreen() {
 
     useEffect(() => {
         if (myLocation && request) {
-            const targetLat = request.status === 'accepted' ? request.pickup_latitude : request.dropoff_latitude;
-            const targetLng = request.status === 'accepted' ? request.pickup_longitude : request.dropoff_longitude;
+            const headingToPickup = shouldHeadToPickup(request.status);
+            const targetLat = headingToPickup ? request.pickup_latitude : request.dropoff_latitude;
+            const targetLng = headingToPickup ? request.pickup_longitude : request.dropoff_longitude;
 
             if (targetLat && targetLng) {
                 const remaining = calculateDistance(myLocation.latitude, myLocation.longitude, targetLat, targetLng);
@@ -295,8 +335,9 @@ export default function ActiveDeliveryScreen() {
 
     const openGoogleMapsNavigation = () => {
         if (!request) return;
-        const targetLat = request.status === 'accepted' ? request.pickup_latitude : request.dropoff_latitude;
-        const targetLng = request.status === 'accepted' ? request.pickup_longitude : request.dropoff_longitude;
+        const headingToPickup = shouldHeadToPickup(request.status);
+        const targetLat = headingToPickup ? request.pickup_latitude : request.dropoff_latitude;
+        const targetLng = headingToPickup ? request.pickup_longitude : request.dropoff_longitude;
 
         // Google Maps navigation intent - works on both Android and iOS
         const url = Platform.select({
@@ -316,9 +357,10 @@ export default function ActiveDeliveryScreen() {
 
     const openAppleMaps = () => {
         if (!request) return;
-        const targetLat = request.status === 'accepted' ? request.pickup_latitude : request.dropoff_latitude;
-        const targetLng = request.status === 'accepted' ? request.pickup_longitude : request.dropoff_longitude;
-        const address = request.status === 'accepted' ? request.pickup_address : request.dropoff_address;
+        const headingToPickup = shouldHeadToPickup(request.status);
+        const targetLat = headingToPickup ? request.pickup_latitude : request.dropoff_latitude;
+        const targetLng = headingToPickup ? request.pickup_longitude : request.dropoff_longitude;
+        const address = headingToPickup ? request.pickup_address : request.dropoff_address;
 
         const url = `maps://?daddr=${targetLat},${targetLng}&q=${encodeURIComponent(address)}`;
         Linking.openURL(url);
@@ -336,7 +378,15 @@ export default function ActiveDeliveryScreen() {
     };
 
     const markAsDelivered = () => {
-        setCodeInputModalVisible(true);
+        if (isFoodOrder) {
+            setCodeInputModalVisible(true);
+            return;
+        }
+
+        Alert.alert('Complete Delivery?', 'Confirm this package has been delivered to the customer.', [
+            { text: 'Cancel', style: 'cancel' },
+            { text: 'Yes, Complete', onPress: confirmDelivery }
+        ]);
     };
 
     const submitReview = async () => {
@@ -347,16 +397,39 @@ export default function ActiveDeliveryScreen() {
 
         setSubmittingReview(true);
         try {
-            const { error } = await supabase.from('reviews').insert({
-                request_id: id,
-                reviewer_id: request.rider_id, // I am the rider
-                reviewee_id: request.user_id,  // Reviewing the user
-                role: 'rider',
-                rating: rating,
-                comment: reviewComment
-            });
+            if (!id || !request?.user_id || !user?.id) {
+                throw new Error('Missing review details');
+            }
 
-            if (error) throw error;
+            if (reviewId) {
+                const { error } = await supabase
+                    .from('reviews')
+                    .update({
+                        rating: rating,
+                        comment: reviewComment || null
+                    })
+                    .eq('id', reviewId);
+
+                if (error) throw error;
+            } else {
+                const { data, error } = await supabase
+                    .from('reviews')
+                    .insert({
+                        request_id: id,
+                        reviewer_id: user.id,
+                        reviewee_id: request.user_id,
+                        role: 'rider',
+                        rating: rating,
+                        comment: reviewComment || null
+                    })
+                    .select('id')
+                    .single();
+
+                if (error) throw error;
+                setReviewId(data?.id || null);
+            }
+
+            setHasRatedCustomer(true);
 
             setReviewModalVisible(false);
 
@@ -365,7 +438,8 @@ export default function ActiveDeliveryScreen() {
                 { text: 'Back to Dashboard', onPress: () => router.replace('/rider/(dashboard)') }
             ]);
         } catch (error: any) {
-            Alert.alert('Error', 'Failed to submit review');
+            Alert.alert('Error', error?.message || 'Failed to submit review');
+        } finally {
             setSubmittingReview(false);
         }
     };
@@ -383,12 +457,11 @@ export default function ActiveDeliveryScreen() {
     };
 
     const callRestaurant = () => {
-        // Try restaurant phone first, then owner's phone
         const phone = restaurantInfo?.phone || restaurantOwnerPhone;
         if (phone) {
             Linking.openURL(`tel:${phone}`);
         } else {
-            Alert.alert('No Phone', 'Restaurant phone number not available.');
+            Alert.alert('No Phone', (isStoreOrder ? 'Store' : 'Restaurant') + ' phone number not available.');
         }
     };
 
@@ -396,18 +469,20 @@ export default function ActiveDeliveryScreen() {
         if (!isFoodOrder || !id) return;
         setChatLoading(true);
         try {
+            const chatType = isStoreOrder ? 'rider_store' : 'rider_restaurant';
             const { data: chatId, error } = await supabase.rpc('get_or_create_rider_order_chat', {
                 p_order_id: id,
-                p_chat_type: 'rider_restaurant'
+                p_chat_type: chatType
             });
             if (error) throw error;
             if (chatId) {
-                // Pass target=restaurant so the header shows Restaurant details
-                router.push(`/order-chat/${chatId}?target=restaurant` as any);
+                const target = isStoreOrder ? 'store' : 'restaurant';
+                router.push(`/order-chat/${chatId}?target=${target}` as any);
             }
         } catch (e: any) {
             console.log('Chat error', e);
-            Alert.alert('Chat Error', e.message || 'Could not open chat with restaurant.');
+            const label = isStoreOrder ? 'store' : 'restaurant';
+            Alert.alert('Chat Error', e.message || `Could not open chat with ${label}.`);
         } finally {
             setChatLoading(false);
         }
@@ -438,9 +513,27 @@ export default function ActiveDeliveryScreen() {
             }
         } else {
             // For P2P / Delivery Requests
-            // TODO: Verify if request.id is the actual Chat ID or if we need to fetch it.
-            // Currently assuming legacy behavior for P2P is correct or will be fixed separately if reported.
-            router.push(`/chat/${id}`);
+            try {
+                if (!request?.user_id || !user?.id) {
+                    Alert.alert('Chat Error', 'Missing participant details for this delivery.');
+                    return;
+                }
+
+                const { data: chatId, error } = await supabase.rpc('get_or_create_chat', {
+                    p_request_id: id,
+                    p_user_id: request.user_id,
+                    p_rider_id: user.id,
+                });
+
+                if (error) throw error;
+                if (chatId) {
+                    router.push(`/chat/${chatId}`);
+                } else {
+                    Alert.alert('Chat Error', 'Could not open customer chat.');
+                }
+            } catch (e: any) {
+                Alert.alert('Chat Error', e?.message || 'Could not open chat with customer.');
+            }
         }
     };
 
@@ -450,6 +543,7 @@ export default function ActiveDeliveryScreen() {
         if (km < 1) return `${Math.round(km * 1000)}m`;
         return `${km.toFixed(1)}km`;
     };
+    const headingToPickup = shouldHeadToPickup(request?.status);
 
     return (
         <ThemedView style={[styles.container, { backgroundColor: bgColor }]}>
@@ -487,7 +581,7 @@ export default function ActiveDeliveryScreen() {
                             >
                                 <View style={styles.markerContainer}>
                                     <View style={[styles.markerPin, { backgroundColor: accent }]}>
-                                        <Ionicons name={isFoodOrder ? 'restaurant' : 'cube'} size={16} color="#fff" />
+                                        <Ionicons name={isFoodOrder ? (isStoreOrder ? 'storefront' : 'restaurant') : 'cube'} size={16} color="#fff" />
                                     </View>
                                     <ThemedText style={[styles.markerText, { backgroundColor: accent }]}>PICKUP</ThemedText>
                                 </View>
@@ -614,13 +708,13 @@ export default function ActiveDeliveryScreen() {
                 {/* Destination Info */}
                 <View style={[styles.destinationCard, { backgroundColor: isDark ? '#333333' : '#F8F9FC' }]}>
                     <View style={styles.destinationHeader}>
-                        <View style={[styles.destinationDot, { backgroundColor: request.status === 'accepted' ? accent : success }]} />
+                        <View style={[styles.destinationDot, { backgroundColor: headingToPickup ? accent : success }]} />
                         <ThemedText style={{ fontSize: 11, fontWeight: '700', letterSpacing: 0.5, color: isDark ? '#FFFFFF' : '#6B7280' }}>
-                            {request.status === 'accepted' ? 'HEADING TO PICKUP' : 'HEADING TO DROPOFF'}
+                            {headingToPickup ? 'HEADING TO PICKUP' : 'HEADING TO DROPOFF'}
                         </ThemedText>
                     </View>
                     <ThemedText style={{ fontSize: 15, fontWeight: '600', lineHeight: 22, color: isDark ? '#FFFFFF' : '#1F2050' }} numberOfLines={2}>
-                        {request.status === 'accepted' ? request.pickup_address : request.dropoff_address}
+                        {headingToPickup ? request.pickup_address : request.dropoff_address}
                     </ThemedText>
                 </View>
 
@@ -663,9 +757,9 @@ export default function ActiveDeliveryScreen() {
                             )}
                             <View>
                                 <ThemedText style={[styles.customerName, { color: textColor }]}>
-                                    {restaurantInfo.name || 'Restaurant'}
+                                    {restaurantInfo.name || (isStoreOrder ? 'Store' : 'Restaurant')}
                                 </ThemedText>
-                                <ThemedText style={[styles.customerLabel, { color: mutedText }]}>Restaurant</ThemedText>
+                                <ThemedText style={[styles.customerLabel, { color: mutedText }]}>{isStoreOrder ? 'Store' : 'Restaurant'}</ThemedText>
                             </View>
                         </View>
 
@@ -746,16 +840,26 @@ export default function ActiveDeliveryScreen() {
                         <ThemedText style={{ fontSize: 15, fontWeight: '700', color: '#FFFFFF' }}>Navigate</ThemedText>
                     </TouchableOpacity>
 
-                    {request.status === 'accepted' ? (
+                    {headingToPickup ? (
                         <TouchableOpacity style={[styles.primaryButton, { backgroundColor: accent }]} onPress={markAsPickedUp}>
                             <Ionicons name="checkmark-circle" size={22} color="#fff" />
                             <ThemedText style={styles.primaryButtonText}>Confirm Pickup</ThemedText>
                         </TouchableOpacity>
                     ) : request.status === 'delivered' ? (
-                        <View style={[styles.primaryButton, { backgroundColor: '#6B7280', opacity: 0.8 }]}>
-                            <Ionicons name="checkmark-done-circle" size={22} color="#fff" />
-                            <ThemedText style={styles.primaryButtonText}>Delivery Completed</ThemedText>
-                        </View>
+                        <TouchableOpacity
+                            style={[styles.primaryButton, { backgroundColor: hasRatedCustomer ? '#6B7280' : '#1F2050', opacity: hasRatedCustomer ? 0.85 : 1 }]}
+                            onPress={() => {
+                                if (!hasRatedCustomer) {
+                                    setReviewModalVisible(true);
+                                }
+                            }}
+                            disabled={hasRatedCustomer}
+                        >
+                            <Ionicons name={hasRatedCustomer ? 'checkmark-done-circle' : 'star'} size={22} color="#fff" />
+                            <ThemedText style={styles.primaryButtonText}>
+                                {hasRatedCustomer ? 'Delivery Completed' : 'Rate Customer'}
+                            </ThemedText>
+                        </TouchableOpacity>
                     ) : (
                         <TouchableOpacity style={[styles.primaryButton, { backgroundColor: success }]} onPress={markAsDelivered}>
                             <Ionicons name="checkmark-circle" size={22} color="#fff" />
@@ -765,46 +869,48 @@ export default function ActiveDeliveryScreen() {
                 </View>
             </ScrollView>
 
-            {/* Code Verification Modal */}
-            <Modal visible={codeInputModalVisible} transparent={true} animationType="slide">
-                <View style={styles.modalOverlay}>
-                    <View style={[styles.reviewCard, { backgroundColor: cardBg }]}>
-                        <ThemedText style={[styles.reviewTitle, { color: textColor }]}>Verify Delivery</ThemedText>
-                        <ThemedText style={{ color: mutedText, textAlign: 'center', marginBottom: 20 }}>
-                            Ask the recipient for the 4-digit secure delivery code.
-                        </ThemedText>
+            {/* Code Verification Modal (Food/Store only) */}
+            {isFoodOrder && (
+                <Modal visible={codeInputModalVisible} transparent={true} animationType="slide">
+                    <View style={styles.modalOverlay}>
+                        <View style={[styles.reviewCard, { backgroundColor: cardBg }]}>
+                            <ThemedText style={[styles.reviewTitle, { color: textColor }]}>Verify Delivery</ThemedText>
+                            <ThemedText style={{ color: mutedText, textAlign: 'center', marginBottom: 20 }}>
+                                Ask the recipient for the 4-digit secure delivery code.
+                            </ThemedText>
 
-                        <TextInput
-                            style={[styles.codeInput, { color: textColor, backgroundColor: bgColor, borderColor: borderColor }]}
-                            placeholder="0-0-0-0"
-                            placeholderTextColor={mutedText}
-                            keyboardType="number-pad"
-                            maxLength={4}
-                            value={deliveryCode}
-                            onChangeText={setDeliveryCode}
-                        />
+                            <TextInput
+                                style={[styles.codeInput, { color: textColor, backgroundColor: bgColor, borderColor: borderColor }]}
+                                placeholder="0-0-0-0"
+                                placeholderTextColor={mutedText}
+                                keyboardType="number-pad"
+                                maxLength={4}
+                                value={deliveryCode}
+                                onChangeText={setDeliveryCode}
+                            />
 
-                        <TouchableOpacity
-                            style={[styles.primaryButton, { backgroundColor: success, marginTop: 20, width: '100%' }]}
-                            onPress={confirmDelivery}
-                            disabled={loading || deliveryCode.length !== 4}
-                        >
-                            {loading ? (
-                                <ActivityIndicator color="#fff" />
-                            ) : (
-                                <ThemedText style={styles.primaryButtonText}>Verify & Complete</ThemedText>
-                            )}
-                        </TouchableOpacity>
+                            <TouchableOpacity
+                                style={[styles.primaryButton, { backgroundColor: success, marginTop: 20, width: '100%' }]}
+                                onPress={confirmDelivery}
+                                disabled={loading || deliveryCode.length !== 4}
+                            >
+                                {loading ? (
+                                    <ActivityIndicator color="#fff" />
+                                ) : (
+                                    <ThemedText style={styles.primaryButtonText}>Verify & Complete</ThemedText>
+                                )}
+                            </TouchableOpacity>
 
-                        <TouchableOpacity
-                            style={{ marginTop: 16, padding: 10 }}
-                            onPress={() => setCodeInputModalVisible(false)}
-                        >
-                            <ThemedText style={{ color: mutedText }}>Cancel</ThemedText>
-                        </TouchableOpacity>
+                            <TouchableOpacity
+                                style={{ marginTop: 16, padding: 10 }}
+                                onPress={() => setCodeInputModalVisible(false)}
+                            >
+                                <ThemedText style={{ color: mutedText }}>Cancel</ThemedText>
+                            </TouchableOpacity>
+                        </View>
                     </View>
-                </View>
-            </Modal>
+                </Modal>
+            )}
 
             {/* Review Modal */}
             <Modal visible={reviewModalVisible} transparent={true} animationType="slide">

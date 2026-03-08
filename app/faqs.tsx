@@ -1,9 +1,11 @@
+import LogoLoader from '@/components/LogoLoader';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { useThemeColor } from '@/hooks/use-theme-color';
+import * as SupabaseUtils from '@/utils/supabase';
 import { Ionicons } from '@expo/vector-icons';
-import { Stack, useRouter } from 'expo-router';
-import React, { useState } from 'react';
+import * as ExpoRouter from 'expo-router';
+import React, { useEffect, useState } from 'react';
 import {
   LayoutAnimation,
   Platform,
@@ -132,25 +134,96 @@ const AccordionItem = ({ item, expanded, onToggle }: { item: FAQItem; expanded: 
 };
 
 export default function FAQScreen() {
-  const router = useRouter();
+  const router = ExpoRouter.useRouter();
   const [expandedId, setExpandedId] = useState<string | null>(null);
-  const [activeCategory, setActiveCategory] = useState(FAQ_DATA[0].title);
+  const [faqData, setFaqData] = useState<FAQCategory[]>([]);
+  const [activeCategory, setActiveCategory] = useState<string>('');
+  const [loading, setLoading] = useState(true);
 
   const cardBg = useThemeColor({ light: '#fff', dark: '#1c1c1e' }, 'background');
   const textColor = useThemeColor({ light: '#1f2050', dark: '#fff' }, 'text');
   const secondaryText = useThemeColor({ light: '#666', dark: '#888' }, 'text');
   const inputBg = useThemeColor({ light: '#f5f5f5', dark: '#2c2c2e' }, 'background');
 
+  useEffect(() => {
+    fetchFAQs();
+  }, []);
+
+  const fetchFAQs = async () => {
+    try {
+      setLoading(true);
+      const { data, error } = await SupabaseUtils.supabase
+        .from('faqs')
+        .select('*')
+        .eq('is_active', true)
+        .order('sort_order', { ascending: true });
+
+      if (error) throw error;
+
+      if (data) {
+        // Group by category
+        const categories: { [key: string]: FAQItem[] } = {};
+        data.forEach(item => {
+          if (!categories[item.category]) {
+            categories[item.category] = [];
+          }
+          categories[item.category].push({
+            id: item.id,
+            question: item.question,
+            answer: item.answer
+          });
+        });
+
+        const formattedData: FAQCategory[] = Object.keys(categories).map(cat => ({
+          title: cat,
+          icon: getCategoryIcon(cat),
+          items: categories[cat]
+        }));
+
+        setFaqData(formattedData);
+        if (formattedData.length > 0) {
+          setActiveCategory(formattedData[0].title);
+        }
+      }
+    } catch (error) {
+      console.error('Error fetching FAQs:', error);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const getCategoryIcon = (category: string) => {
+    switch (category.toLowerCase()) {
+      case 'order & tracking': return 'time-outline';
+      case 'payments & refunds': return 'card-outline';
+      case 'riders & deliveries': return 'bicycle-outline';
+      case 'partners & rider program': return 'business-outline';
+      default: return 'help-circle-outline';
+    }
+  }
+
   const toggleAccordion = (id: string) => {
     LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
     setExpandedId(expandedId === id ? null : id);
   };
 
-  const currentCategory = FAQ_DATA.find(c => c.title === activeCategory) || FAQ_DATA[0];
+  const currentCategory = faqData.find(c => c.title === activeCategory);
+
+  if (loading) {
+    return (
+      <ThemedView style={[styles.container, { justifyContent: 'center', alignItems: 'center' }]}>
+        <LogoLoader size={80} />
+      </ThemedView>
+    );
+  }
 
   return (
     <ThemedView style={styles.container}>
-      <Stack.Screen options={{ headerShown: false }} />
+      <ExpoRouter.Stack.Screen
+        options={{
+          headerShown: false,
+        }}
+      />
       {/* Header */}
       <View style={styles.header}>
         <TouchableOpacity onPress={() => router.back()} style={styles.backBtn}>
@@ -181,7 +254,7 @@ export default function FAQScreen() {
         style={styles.categoryScroll}
         contentContainerStyle={styles.categoryContent}
       >
-        {FAQ_DATA.map((cat) => (
+        {faqData.map((cat) => (
           <TouchableOpacity
             key={cat.title}
             onPress={() => {
@@ -213,14 +286,18 @@ export default function FAQScreen() {
       {/* FAQ List */}
       <ScrollView style={styles.listContainer} showsVerticalScrollIndicator={false}>
         <View style={[styles.faqCard, { backgroundColor: cardBg }]}>
-          {currentCategory.items.map((item) => (
+          {currentCategory ? currentCategory.items.map((item) => (
             <AccordionItem
               key={item.id}
               item={item}
               expanded={expandedId === item.id}
               onToggle={() => toggleAccordion(item.id)}
             />
-          ))}
+          )) : (
+            <ThemedText style={{ padding: 20, textAlign: 'center', color: secondaryText }}>
+              Selecet a category or no FAQs found.
+            </ThemedText>
+          )}
         </View>
         <View style={{ height: 100 }} />
       </ScrollView>

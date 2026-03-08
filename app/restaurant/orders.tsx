@@ -120,14 +120,19 @@ export default function OrdersScreen() {
     const renderOrderItem = ({ item: order }: { item: any }) => {
         const isPickup = !order.dropoff_latitude;
         let action = STATUS_ACTIONS[order.status as OrderStatus];
+        const riderAcceptedAwaitingPickup = !isPickup && order.status === 'ready' && !!order.rider_id;
 
         // Override action for Pickup orders (Ready -> Delivered directly)
         if (isPickup && order.status === 'ready') {
             action = { label: 'Mark Picked Up', next: 'delivered', color: '#10b981', icon: 'checkmark-done' };
         }
+        // If a rider already accepted while order is still "ready", allow pickup code verification.
+        if (riderAcceptedAwaitingPickup) {
+            action = { label: 'Verify Pickup', next: 'out_for_delivery', color: '#8b5cf6', icon: 'shield-checkmark', isSpecial: true, isVerify: true };
+        }
 
         const statusColor = getStatusColor(order.status);
-        const hasRider = (order.status === 'with_rider' || order.status === 'out_for_delivery') && order.rider;
+        const hasRider = !!order.rider_id;
 
         return (
             <View style={[styles.card, { backgroundColor: cardBg, borderColor }]}>
@@ -135,7 +140,7 @@ export default function OrdersScreen() {
                 <View style={[styles.statusRibbon, { backgroundColor: statusColor }]}>
                     <Ionicons name={getStatusIcon(order.status) as any} size={14} color="#fff" />
                     <ThemedText style={styles.statusRibbonText}>
-                        {isPickup ? 'SELF PICKUP' : order.status.toUpperCase().replace('_', ' ')}
+                        {isPickup ? 'SELF PICKUP' : riderAcceptedAwaitingPickup ? 'RIDER ACCEPTED' : order.status.toUpperCase().replace('_', ' ')}
                     </ThemedText>
                 </View>
 
@@ -215,7 +220,7 @@ export default function OrdersScreen() {
                                 )}
                                 <View>
                                     <ThemedText style={styles.riderNameSmall}>
-                                        {order.rider?.profile?.first_name} {order.rider?.profile?.last_name?.charAt(0)}.
+                                        {order.rider?.profile?.first_name ? `${order.rider.profile.first_name} ${order.rider?.profile?.last_name?.charAt(0) || ''}.` : 'Assigned Rider'}
                                     </ThemedText>
                                     <ThemedText style={[styles.riderVehicleSmall, { color: subtleText }]}>
                                         {order.rider?.vehicle_type || 'Rider'} • {order.rider?.vehicle_plate || ''}
@@ -256,7 +261,7 @@ export default function OrdersScreen() {
                         )}
 
                         {/* Call Rider Button (Only when rider is assigned) */}
-                        {((order.status === 'with_rider' || order.status === 'out_for_delivery') && order.rider_id) && !isPickup && (
+                        {((order.status === 'with_rider' || order.status === 'out_for_delivery' || riderAcceptedAwaitingPickup) && order.rider_id) && !isPickup && (
                             <TouchableOpacity
                                 style={styles.callButton}
                                 onPress={() => startCall(order.rider_id!)}
@@ -267,7 +272,7 @@ export default function OrdersScreen() {
                         )}
 
                         {/* Chat Button (Only when rider is assigned) */}
-                        {((order.status === 'with_rider' || order.status === 'out_for_delivery') && order.rider_id) && !isPickup && (
+                        {((order.status === 'with_rider' || order.status === 'out_for_delivery' || riderAcceptedAwaitingPickup) && order.rider_id) && !isPickup && (
                             <TouchableOpacity
                                 style={[styles.chatButton, { opacity: chatLoading === order.id ? 0.7 : 1 }]}
                                 onPress={() => openChat(order.id)}
@@ -287,6 +292,7 @@ export default function OrdersScreen() {
                             <TouchableOpacity
                                 style={styles.actionButton}
                                 onPress={() => {
+                                    if (!action) return;
                                     if (action.isSpecial) {
                                         if (action.isVerify) {
                                             setVerifyOrderId(order.id);

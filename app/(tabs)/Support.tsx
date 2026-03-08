@@ -2,6 +2,7 @@ import GlitchLogo from '@/components/GlitchLogo'; // The new component
 import LogoLoader from '@/components/LogoLoader';
 import { ThemedText } from '@/components/themed-text';
 import { useTheme } from '@/hooks/use-theme';
+import { supabase as supabaseClient } from '@/utils/supabase';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import React, { useEffect, useState } from 'react';
@@ -65,10 +66,17 @@ const FAQS = [
 export default function SupportScreen() {
   const [loading, setLoading] = useState(true);
   const [config, setConfig] = useState<any>(null);
+  const [faqs, setFaqs] = useState<any[]>([]);
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const { theme } = useTheme();
   const isDark = theme === 'dark';
+
+  console.log('DEBUG: SupportScreen init', {
+    hasSupabase: !!supabaseClient,
+    hasUseRouter: !!useRouter,
+    hasRouter: !!router
+  });
 
   useEffect(() => {
     fetchConfig();
@@ -76,13 +84,30 @@ export default function SupportScreen() {
 
   const fetchConfig = async () => {
     try {
-      const { data, error } = await supabase
+      // Fetch support config
+      const configResult = await supabaseClient
         .from('support_config')
         .select('*')
         .single();
 
-      if (error) throw error;
-      setConfig(data);
+      const configData = configResult.data;
+      const configError = configResult.error;
+
+      if (configError) throw configError;
+      setConfig(configData);
+
+      // Fetch top 3 FAQs
+      const faqResult = await supabaseClient
+        .from('faqs')
+        .select('*')
+        .eq('is_active', true)
+        .order('sort_order', { ascending: true })
+        .limit(3);
+
+      const faqData = faqResult.data;
+      const faqError = faqResult.error;
+
+      if (faqData) setFaqs(faqData);
     } catch (error) {
       console.error('Error fetching support config:', error);
     } finally {
@@ -115,7 +140,7 @@ export default function SupportScreen() {
       subtitle: 'Chat with us on WhatsApp',
       icon: 'logo-whatsapp',
       action: 'link',
-      url: `https://wa.me/${config?.whatsapp_number?.replace(/\D/g, '')}`,
+      url: `https://wa.me/${config?.whatsapp_number?.replace(/\D/g, '') || ''}`,
       enabled: config?.whatsapp_enabled ?? true
     },
     {
@@ -133,7 +158,7 @@ export default function SupportScreen() {
       subtitle: 'Speak with a representative',
       icon: 'call-outline',
       action: 'link',
-      url: `tel:${config?.call_center_number?.replace(/\D/g, '')}`,
+      url: `tel:${config?.call_center_number?.replace(/\D/g, '') || ''}`,
       enabled: config?.call_center_enabled ?? false
     },
   ].filter(opt => opt.enabled);
@@ -194,12 +219,17 @@ export default function SupportScreen() {
         {/* FAQ Section */}
         <Animated.View entering={FadeInUp.delay(400).springify()} style={styles.faqSection}>
           <ThemedText style={[styles.sectionTitle, { color: colors.text }]}>Frequently Asked Questions</ThemedText>
-          {FAQS.map((faq, index) => (
+          {faqs.map((faq, index) => (
             <View key={faq.id} style={[styles.faqCard, { borderBottomColor: colors.border }]}>
               <ThemedText style={[styles.faqQuestion, { color: colors.text }]}>{faq.question}</ThemedText>
               <ThemedText style={[styles.faqAnswer, { color: colors.textSec }]}>{faq.answer}</ThemedText>
             </View>
           ))}
+          {faqs.length === 0 && (
+            <ThemedText style={{ color: colors.textSec, textAlign: 'center', marginTop: 10 }}>
+              No FAQs available at the moment.
+            </ThemedText>
+          )}
         </Animated.View>
 
       </ScrollView>
@@ -216,7 +246,7 @@ const styles = StyleSheet.create({
   },
   heroSection: {
     alignItems: 'center',
-    paddingTop: 80,
+    paddingTop: 20,
     paddingBottom: 30,
     marginBottom: 10,
   },
@@ -224,6 +254,7 @@ const styles = StyleSheet.create({
     fontSize: 28,
     fontWeight: '700',
     marginBottom: 8,
+    lineHeight: 36,
   },
   headerSub: {
     fontSize: 16,

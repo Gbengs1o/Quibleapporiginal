@@ -131,7 +131,8 @@ export default function RiderDashboard() {
     const { session } = useAuth();
     const { openMenu } = useRiderMenu();
     const { riderWallet, refreshWallet } = useWallet();
-    const { unreadMessages, pendingDeliveries, pendingFoodInvites, unreadAlerts } = useRiderNotifications();
+    const { unreadMessages, pendingDeliveries, pendingFoodInvites, activeOrders, unreadAlerts } = useRiderNotifications();
+    const incomingRequests = pendingFoodInvites + pendingDeliveries;
 
     // Theme Hooks
     const bgColor = useThemeColor({ light: '#F5F6FA', dark: '#121212' }, 'background');
@@ -198,7 +199,7 @@ export default function RiderDashboard() {
                     useNativeDriver: true
                 }).start();
 
-                await fetchStats(rider.id);
+                await fetchStats(rider.user_id);
             }
 
             if (profile) {
@@ -212,14 +213,14 @@ export default function RiderDashboard() {
         }
     };
 
-    const fetchStats = async (riderId: string) => {
+    const fetchStats = async (riderUserId: string) => {
         const startOfDay = new Date();
         startOfDay.setHours(0, 0, 0, 0);
 
         const { data: todayJobs } = await supabase
             .from('delivery_requests')
             .select('final_price')
-            .eq('rider_id', riderId)
+            .eq('rider_id', riderUserId)
             .eq('status', 'delivered')
             .gte('updated_at', startOfDay.toISOString());
 
@@ -232,7 +233,7 @@ export default function RiderDashboard() {
         const { data: history } = await supabase
             .from('delivery_requests')
             .select('*')
-            .eq('rider_id', riderId)
+            .eq('rider_id', riderUserId)
             .in('status', ['delivered', 'cancelled', 'picked_up'])
             .order('updated_at', { ascending: false })
             .limit(5);
@@ -411,11 +412,21 @@ export default function RiderDashboard() {
                         />
 
                         <StatCard
-                            title="Food Orders"
-                            subtitle="Restaurant Invites"
-                            value={pendingFoodInvites.toString()}
-                            badgeValue={pendingFoodInvites > 0 ? "NEW" : undefined}
-                            onPress={() => router.push('/rider/deliveries?tab=food')}
+                            title="Order Requests"
+                            subtitle="Ride Hailing + Vendor Invites"
+                            value={incomingRequests.toString()}
+                            badgeValue={incomingRequests > 0 ? "NEW" : undefined}
+                            onPress={() => router.push('/rider/deliveries?tab=orders')}
+                            cardBg={cardBg}
+                            textColor={textColor}
+                        />
+
+                        <StatCard
+                            title="Assigned Orders"
+                            subtitle="Ready & Active"
+                            value={activeOrders.toString()}
+                            badgeValue={activeOrders > 0 ? "LIVE" : undefined}
+                            onPress={() => router.push('/rider/deliveries?tab=active')}
                             cardBg={cardBg}
                             textColor={textColor}
                         />
@@ -436,9 +447,15 @@ export default function RiderDashboard() {
                     <TouchableOpacity
                         style={styles.ctaButton}
                         activeOpacity={0.8}
-                        onPress={() => router.push('/rider/deliveries')}
+                        onPress={() => router.push(activeOrders > 0 ? '/rider/deliveries?tab=active' : '/rider/deliveries?tab=orders')}
                     >
-                        <Text style={styles.ctaText}>View new delivery request</Text>
+                        <Text style={styles.ctaText}>
+                            {activeOrders > 0
+                                ? `You have ${activeOrders} active order${activeOrders > 1 ? 's' : ''}`
+                                : incomingRequests > 0
+                                    ? `You have ${incomingRequests} new request${incomingRequests > 1 ? 's' : ''}`
+                                    : 'View new delivery request'}
+                        </Text>
                     </TouchableOpacity>
                 </View>
 

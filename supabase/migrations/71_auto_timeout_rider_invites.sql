@@ -16,7 +16,7 @@ CREATE OR REPLACE FUNCTION set_invite_expiry()
 RETURNS TRIGGER AS $$
 BEGIN
     IF NEW.status = 'invited' AND NEW.expired_at IS NULL THEN
-        NEW.expired_at := now() + interval '20 seconds';
+        NEW.expired_at := now() + interval '90 seconds';
     END IF;
     RETURN NEW;
 END;
@@ -28,9 +28,9 @@ BEFORE INSERT ON public.order_rider_bids
 FOR EACH ROW
 EXECUTE FUNCTION set_invite_expiry();
 
--- Backfill existing invited bids with an expiry (20s from their creation)
+-- Backfill existing invited bids with an expiry (40s from their creation)
 UPDATE public.order_rider_bids 
-SET expired_at = created_at + interval '20 seconds'
+SET expired_at = created_at + interval '90 seconds'
 WHERE status = 'invited' AND expired_at IS NULL;
 
 -- 4. expire_stale_invites RPC

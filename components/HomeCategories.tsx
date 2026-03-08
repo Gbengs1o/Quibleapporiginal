@@ -1,15 +1,14 @@
-import { useTheme } from '@/hooks/use-theme';
 import { useThemeColor } from '@/hooks/use-theme-color';
+import { supabase } from '@/utils/supabase';
 import { Feather, Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
     Dimensions,
     Modal,
     ScrollView,
     StyleSheet,
     TextInput,
-    TouchableOpacity,
-    View,
+    TouchableOpacity, useColorScheme, View
 } from 'react-native';
 import { ThemedText } from './themed-text';
 
@@ -38,14 +37,12 @@ interface HomeCategoriesProps {
 }
 
 const CATEGORIES: { id: ServiceCategory; label: string; icon: string; iconType: 'ionicons' | 'material' | 'feather' }[] = [
-    { id: 'delivery', label: 'Delivery', icon: 'bicycle', iconType: 'ionicons' },
+    { id: 'delivery', label: 'Ride Hailing', icon: 'car', iconType: 'ionicons' },
     { id: 'food', label: 'Food', icon: 'food', iconType: 'material' },
     { id: 'handy', label: 'Handy', icon: 'tool', iconType: 'feather' },
     { id: 'store', label: 'Store', icon: 'storefront-outline', iconType: 'ionicons' },
 ];
 
-const DISH_CATEGORIES = ['African dishes', 'Special dishes', 'Others'];
-const STORE_CATEGORIES = ['Grocery', 'Pharmacy', 'Fashion', 'Electronics', 'Beauty', 'Home', 'Supermarket'];
 
 const SORT_OPTIONS: { id: SortOption; label: string; icon: string }[] = [
     { id: 'distance', label: 'Nearest', icon: 'location' },
@@ -85,9 +82,38 @@ const HomeCategories: React.FC<HomeCategoriesProps> = ({
     ratingFilter,
     onRatingFilterChange,
 }) => {
-    const { theme } = useTheme();
+    const theme = useColorScheme();
     const isDark = theme === 'dark';
     const [showFilterModal, setShowFilterModal] = useState(false);
+
+    // Dynamic categories
+    const [dishCategories, setDishCategories] = useState<string[]>(['African dishes', 'Special dishes', 'Others']);
+    const [storeCategories, setStoreCategories] = useState<string[]>(['Grocery', 'Pharmacy', 'Fashion', 'Electronics', 'Beauty', 'Home', 'Supermarket']);
+
+    useEffect(() => {
+        fetchCategories();
+    }, []);
+
+    const fetchCategories = async () => {
+        try {
+            const { data, error } = await supabase
+                .from('categories')
+                .select('name, type')
+                .eq('is_active', true)
+                .order('sort_order', { ascending: true });
+
+            if (error) throw error;
+            if (data && data.length > 0) {
+                const restaurantCats = data.filter(c => c.type === 'restaurant').map(c => c.name);
+                const storeCats = data.filter(c => c.type === 'store').map(c => c.name);
+
+                if (restaurantCats.length > 0) setDishCategories(restaurantCats);
+                if (storeCats.length > 0) setStoreCategories(storeCats);
+            }
+        } catch (error) {
+            console.error('Error fetching categories:', error);
+        }
+    };
 
     const inputBg = useThemeColor({ light: '#f5f5f5', dark: '#1c1c1e' }, 'background');
     const textColor = useThemeColor({ light: '#1f2050', dark: '#fff' }, 'text');
@@ -212,7 +238,7 @@ const HomeCategories: React.FC<HomeCategoriesProps> = ({
                     style={styles.quickFiltersScroll}
                     contentContainerStyle={styles.quickFiltersContainer}
                 >
-                    {DISH_CATEGORIES.map((cat) => (
+                    {dishCategories.map((cat) => (
                         <TouchableOpacity
                             key={cat}
                             style={[
@@ -268,7 +294,7 @@ const HomeCategories: React.FC<HomeCategoriesProps> = ({
                     style={styles.quickFiltersScroll}
                     contentContainerStyle={styles.quickFiltersContainer}
                 >
-                    {STORE_CATEGORIES.map((cat) => (
+                    {storeCategories.map((cat) => (
                         <TouchableOpacity
                             key={cat}
                             style={[
@@ -423,7 +449,7 @@ const HomeCategories: React.FC<HomeCategoriesProps> = ({
                                                 All Categories
                                             </ThemedText>
                                         </TouchableOpacity>
-                                        {(selectedCategory === 'food' ? DISH_CATEGORIES : STORE_CATEGORIES).map((cat) => (
+                                        {(selectedCategory === 'food' ? dishCategories : storeCategories).map((cat) => (
                                             <TouchableOpacity
                                                 key={cat}
                                                 style={[

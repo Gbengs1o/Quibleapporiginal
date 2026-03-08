@@ -208,7 +208,8 @@ export default function MessagesScreen() {
     };
 
     const renderChatItem = ({ item }: { item: any }) => {
-        const isRiderChat = item.chat_type === 'rider_restaurant';
+        const isRiderChat = item.chat_type === 'rider_restaurant' || item.chat_type === 'rider_store';
+        const chatTarget = isRiderChat ? 'rider' : 'customer';
 
         const customerName = isRiderChat
             ? (item.rider ? `${item.rider.first_name || ''} ${item.rider.last_name || ''}`.trim() : 'Rider')
@@ -222,7 +223,7 @@ export default function MessagesScreen() {
         return (
             <TouchableOpacity
                 style={[styles.chatRow, { backgroundColor: cardBg, borderBottomColor: borderColor }]}
-                onPress={() => router.push(`/order-chat/${item.id}`)}
+                onPress={() => router.push(`/order-chat/${item.id}?target=${chatTarget}`)}
                 activeOpacity={0.7}
             >
                 {/* Avatar */}

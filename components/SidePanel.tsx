@@ -35,6 +35,8 @@ const AVAILABLE_SERVICES = [
   { key: 'handyman', label: 'Handyman', icon: 'construct', route: 'join-handyman', color: '#2196F3' },
 ];
 
+const DEFAULT_SINGLE_BUSINESS_MODE_ENABLED = true;
+
 const SidePanel: React.FC<SidePanelProps> = ({ isOpen, onClose, profile }) => {
   const { theme, toggleTheme } = useTheme();
   const isDark = theme === 'dark';
@@ -50,6 +52,7 @@ const SidePanel: React.FC<SidePanelProps> = ({ isOpen, onClose, profile }) => {
   const [store, setStore] = useState<{ id: string; name: string; logo_url: string | null; status: string } | null>(null);
   const [rider, setRider] = useState<{ id: string; status: string; rider_photo: string | null } | null>(null);
   const [loading, setLoading] = useState(true);
+  const [singleBusinessModeEnabled, setSingleBusinessModeEnabled] = useState<boolean>(DEFAULT_SINGLE_BUSINESS_MODE_ENABLED);
 
   useEffect(() => {
     if (user) {
@@ -62,6 +65,44 @@ const SidePanel: React.FC<SidePanelProps> = ({ isOpen, onClose, profile }) => {
       setLoading(false);
     }
   }, [user]);
+
+  useEffect(() => {
+    if (!isOpen) return;
+    let isMounted = true;
+
+    const fetchBusinessControls = async () => {
+      try {
+        const { data, error } = await supabase
+          .from('platform_settings')
+          .select('value')
+          .eq('key', 'business_registration_controls')
+          .single();
+
+        if (error) {
+          if (isMounted) setSingleBusinessModeEnabled(DEFAULT_SINGLE_BUSINESS_MODE_ENABLED);
+          return;
+        }
+
+        const value = (data?.value && typeof data.value === 'object')
+          ? (data.value as Record<string, any>)
+          : {};
+
+        if (!isMounted) return;
+        setSingleBusinessModeEnabled(
+          value.single_business_mode_enabled !== undefined
+            ? Boolean(value.single_business_mode_enabled)
+            : DEFAULT_SINGLE_BUSINESS_MODE_ENABLED
+        );
+      } catch (error) {
+        if (isMounted) setSingleBusinessModeEnabled(DEFAULT_SINGLE_BUSINESS_MODE_ENABLED);
+      }
+    };
+
+    void fetchBusinessControls();
+    return () => {
+      isMounted = false;
+    };
+  }, [isOpen]);
 
   const checkRiderStatus = async () => {
     try {
@@ -120,6 +161,14 @@ const SidePanel: React.FC<SidePanelProps> = ({ isOpen, onClose, profile }) => {
     ...(rider ? ['rider'] : []),
   ];
   const availableToRegister = AVAILABLE_SERVICES.filter(s => !registeredKeys.includes(s.key));
+  const canAddAnotherBusiness = !singleBusinessModeEnabled || !hasAnyBusiness;
+  const canShowAddButton = availableToRegister.length > 0 && canAddAnotherBusiness;
+
+  useEffect(() => {
+    if (!canAddAnotherBusiness && isAddServiceOpen) {
+      setAddServiceOpen(false);
+    }
+  }, [canAddAnotherBusiness, isAddServiceOpen]);
 
   // Quick Actions
   const quickActions = [
@@ -170,7 +219,7 @@ const SidePanel: React.FC<SidePanelProps> = ({ isOpen, onClose, profile }) => {
                   <View style={styles.section}>
                     <View style={styles.sectionHeader}>
                       <ThemedText style={styles.sectionTitle}>Your Businesses</ThemedText>
-                      {availableToRegister.length > 0 && (
+                      {canShowAddButton && (
                         <TouchableOpacity
                           style={[styles.addButton, { backgroundColor: '#F4821F' }]}
                           onPress={() => setAddServiceOpen(!isAddServiceOpen)}
@@ -280,7 +329,7 @@ const SidePanel: React.FC<SidePanelProps> = ({ isOpen, onClose, profile }) => {
                     )}
 
                     {/* Add New Service Dropdown */}
-                    {isAddServiceOpen && availableToRegister.length > 0 && (
+                    {isAddServiceOpen && canShowAddButton && (
                       <View style={[styles.addServiceContainer, { backgroundColor: cardBg, borderColor }]}>
                         <ThemedText style={[styles.addServiceTitle, { color: subtleText }]}>
                           Add a new service

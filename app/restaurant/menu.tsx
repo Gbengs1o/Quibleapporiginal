@@ -36,8 +36,6 @@ interface MenuItem {
     created_at: string;
 }
 
-const CATEGORIES = ['African dishes', 'Special dishes', 'Others'] as const;
-
 export default function MenuScreen() {
     const navigation = useNavigation();
     const { openMenu } = useRestaurantMenu();
@@ -49,6 +47,7 @@ export default function MenuScreen() {
 
     const [loading, setLoading] = useState(true);
     const [menuItems, setMenuItems] = useState<MenuItem[]>([]);
+    const [categories, setCategories] = useState<string[]>(['African dishes', 'Special dishes', 'Others']); // Default fallback
     const [filteredItems, setFilteredItems] = useState<MenuItem[]>([]);
     const [restaurantId, setRestaurantId] = useState<string | null>(null);
     const [showModal, setShowModal] = useState(false);
@@ -64,12 +63,19 @@ export default function MenuScreen() {
     const [formData, setFormData] = useState({
         name: '',
         description: '',
-        category: 'African dishes' as typeof CATEGORIES[number],
+        category: categories[0] || 'Others',
         price: '',
         sides: '',
         image_url: null as string | null,
         is_active: false,
     });
+
+    useEffect(() => {
+        // Update default form category if categories change
+        if (categories.length > 0 && formData.category === '') {
+            setFormData(prev => ({ ...prev, category: categories[0] }));
+        }
+    }, [categories]);
 
     // Theme colors
     const headerIconColor = useThemeColor({ light: '#1f2050', dark: '#fff' }, 'text');
@@ -82,7 +88,26 @@ export default function MenuScreen() {
 
     useEffect(() => {
         fetchRestaurantAndMenu();
+        fetchCategories();
     }, [user]);
+
+    const fetchCategories = async () => {
+        try {
+            const { data, error } = await supabase
+                .from('categories')
+                .select('name')
+                .eq('type', 'restaurant')
+                .eq('is_active', true)
+                .order('sort_order', { ascending: true });
+
+            if (error) throw error;
+            if (data && data.length > 0) {
+                setCategories(data.map(c => c.name));
+            }
+        } catch (error) {
+            console.error('Error fetching categories:', error);
+        }
+    };
 
     useEffect(() => {
         filterItems();
@@ -185,7 +210,7 @@ export default function MenuScreen() {
         setFormData({
             name: '',
             description: '',
-            category: 'African dishes',
+            category: categories[0] || 'Others',
             price: '',
             sides: '',
             image_url: null,
@@ -429,7 +454,7 @@ export default function MenuScreen() {
             <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.filterScrollView}>
                 <View style={styles.filterContainer}>
                     {/* Category Filters */}
-                    {CATEGORIES.map((cat) => (
+                    {categories.map((cat) => (
                         <TouchableOpacity
                             key={cat}
                             style={[
@@ -578,7 +603,7 @@ export default function MenuScreen() {
                             {/* Category */}
                             <ThemedText style={[styles.formLabel, { color: textColor }]}>Category *</ThemedText>
                             <View style={styles.categoryContainer}>
-                                {CATEGORIES.map((cat) => (
+                                {categories.map((cat) => (
                                     <TouchableOpacity
                                         key={cat}
                                         style={[

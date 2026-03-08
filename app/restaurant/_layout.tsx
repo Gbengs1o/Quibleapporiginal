@@ -16,7 +16,6 @@ export default function RestaurantLayout() {
                     <Stack.Screen name="reviews" />
                     <Stack.Screen name="messages" />
                     <Stack.Screen name="settings" />
-                    <Stack.Screen name="support" />
                     <Stack.Screen name="wallet" />
                     <Stack.Screen name="analytics" />
                 </Stack>

@@ -2,6 +2,7 @@ import RiderLoader from '@/components/RiderLoader';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { useAuth } from '@/contexts/auth';
+import { useCall } from '@/contexts/call-context';
 import { useThemeColor } from '@/hooks/use-theme-color';
 import { uploadToCloudinary } from '@/utils/cloudinary';
 import { supabase } from '@/utils/supabase';
@@ -26,22 +27,30 @@ import {
     TouchableOpacity,
     View,
 } from 'react-native';
-import Reanimated, { FadeInDown } from 'react-native-reanimated';
 
 const { width } = Dimensions.get('window');
 
 // Status timeline steps
-const STATUS_STEPS = [
+const PACKAGE_STATUS_STEPS = [
     { key: 'pending', label: 'Waiting for Bids', icon: 'hourglass-outline' as const },
     { key: 'accepted', label: 'Rider Accepted', icon: 'checkmark-circle-outline' as const },
     { key: 'picked_up', label: 'Picked Up', icon: 'cube-outline' as const },
     { key: 'delivered', label: 'Delivered', icon: 'flag-outline' as const },
 ];
 
+const RIDE_STATUS_STEPS = [
+    { key: 'pending', label: 'Waiting for Bids', icon: 'hourglass-outline' as const },
+    { key: 'accepted', label: 'Rider Accepted', icon: 'checkmark-circle-outline' as const },
+    { key: 'picked_up', label: 'Passenger Picked Up', icon: 'person-outline' as const },
+    { key: 'delivered', label: 'Trip Complete', icon: 'flag-outline' as const },
+];
+
 export default function RequestDetailsScreen() {
     const { id } = useLocalSearchParams();
+    const requestId = Array.isArray(id) ? id[0] : id;
     const router = useRouter();
     const { user } = useAuth();
+    const { startCall } = useCall();
     const scaleAnim = useRef(new Animated.Value(0.9)).current;
     const fadeAnim = useRef(new Animated.Value(0)).current;
 
@@ -70,6 +79,9 @@ export default function RequestDetailsScreen() {
     const [rating, setRating] = useState(0);
     const [reviewComment, setReviewComment] = useState('');
     const [submittingReview, setSubmittingReview] = useState(false);
+    const [reviewId, setReviewId] = useState<string | null>(null);
+    const [hasRatedRider, setHasRatedRider] = useState(false);
+    const [openingChat, setOpeningChat] = useState(false);
 
     useEffect(() => {
         Animated.parallel([
@@ -79,29 +91,42 @@ export default function RequestDetailsScreen() {
     }, []);
 
     useEffect(() => {
+        if (!requestId) return;
         fetchDetails();
 
         // Real-time subscription for new bids
         const subscription = supabase
-            .channel(`bids:${id}`)
-            .on('postgres_changes', { event: '*', schema: 'public', table: 'delivery_bids', filter: `request_id=eq.${id}` },
-                () => fetchDetails()
+            .channel(`bids:${requestId}`)
+            .on('postgres_changes', { event: '*', schema: 'public', table: 'delivery_bids', filter: `request_id=eq.${requestId}` },
+                () => fetchDetails({ silent: true })
             )
-            .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'delivery_requests', filter: `id=eq.${id}` },
-                () => fetchDetails()
+            .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'delivery_requests', filter: `id=eq.${requestId}` },
+                () => fetchDetails({ silent: true })
             )
             .subscribe();
 
         return () => { supabase.removeChannel(subscription); };
-    }, [id]);
+    }, [requestId]);
 
-    const fetchDetails = async () => {
+    // Fallback polling for networks where realtime can be delayed.
+    useEffect(() => {
+        if (!requestId) return;
+        const poll = setInterval(() => {
+            fetchDetails({ silent: true });
+        }, 5000);
+        return () => clearInterval(poll);
+    }, [requestId]);
+
+    const fetchDetails = async (options?: { silent?: boolean }) => {
+        if (!requestId) return;
+        const silent = options?.silent === true;
         try {
+            if (!silent) setLoading(true);
             // Fetch Request
             const { data: reqData, error: reqError } = await supabase
                 .from('delivery_requests')
                 .select('*')
-                .eq('id', id)
+                .eq('id', requestId)
                 .single();
 
             if (reqError) throw reqError;
@@ -125,18 +150,37 @@ export default function RequestDetailsScreen() {
                         )
                     )
                 `)
-                .eq('request_id', id)
+                .eq('request_id', requestId)
                 .neq('status', 'rejected') // Hide rejected bids
                 .order('amount', { ascending: true });
 
             if (bidsError) throw bidsError;
             setBids(bidsData || []);
 
+            if (user?.id) {
+                const { data: existingReviews, error: reviewError } = await supabase
+                    .from('reviews')
+                    .select('id')
+                    .eq('request_id', requestId)
+                    .eq('reviewer_id', user.id)
+                    .eq('role', 'user')
+                    .order('created_at', { ascending: false })
+                    .limit(1);
+
+                if (reviewError) {
+                    console.error('Existing review fetch error:', reviewError);
+                } else {
+                    const existingReview = existingReviews?.[0];
+                    setReviewId(existingReview?.id || null);
+                    setHasRatedRider(!!existingReview);
+                }
+            }
+
         } catch (error) {
             console.error(error);
             Alert.alert('Error', 'Could not load details');
         } finally {
-            setLoading(false);
+            if (!silent) setLoading(false);
             setRefreshing(false);
         }
     };
@@ -157,7 +201,7 @@ export default function RequestDetailsScreen() {
                 const { error } = await supabase
                     .from('delivery_requests')
                     .update({ item_image_url: imageUrl, media_type: 'image' })
-                    .eq('id', id);
+                    .eq('id', requestId);
 
                 if (error) throw error;
                 Alert.alert('Success', 'Package image updated!');
@@ -171,10 +215,11 @@ export default function RequestDetailsScreen() {
     };
 
     const handleAcceptBid = async (bid: any) => {
+        if (!requestId) return;
         setAccepting(true);
         try {
             const { data, error } = await supabase.rpc('accept_delivery_bid', {
-                p_request_id: id,
+                p_request_id: requestId,
                 p_bid_id: bid.id
             });
 
@@ -226,7 +271,56 @@ export default function RequestDetailsScreen() {
         }
     };
 
+    const handleRiderInAppCall = async () => {
+        const riderUserId = assignedRider?.rider?.user_id || request?.rider_id;
+        if (!riderUserId) {
+            Alert.alert('Unavailable', 'Rider is not assigned yet.');
+            return;
+        }
+
+        try {
+            await startCall(riderUserId);
+        } catch (error) {
+            const phone = assignedRider?.rider?.profile?.phone_number;
+            if (phone) {
+                handleCallRider(phone);
+            } else {
+                Alert.alert('Call Error', 'Could not start in-app call.');
+            }
+        }
+    };
+
+    const handleRiderChat = async () => {
+        if (!requestId || !request?.user_id || !request?.rider_id) {
+            Alert.alert('Chat Error', 'Rider chat is not available yet.');
+            return;
+        }
+
+        setOpeningChat(true);
+        try {
+            const { data: chatId, error } = await supabase.rpc('get_or_create_chat', {
+                p_request_id: requestId,
+                p_user_id: request.user_id,
+                p_rider_id: request.rider_id,
+            });
+
+            if (error) throw error;
+
+            if (chatId) {
+                router.push(`/chat/${chatId}`);
+                return;
+            }
+
+            Alert.alert('Chat Error', 'Could not open chat with rider.');
+        } catch (error: any) {
+            Alert.alert('Chat Error', error?.message || 'Could not open chat with rider.');
+        } finally {
+            setOpeningChat(false);
+        }
+    };
+
     const handleCancelRequest = () => {
+        if (!requestId) return;
         Alert.alert('Cancel Request?', 'Are you sure you want to cancel this delivery request?', [
             { text: 'No', style: 'cancel' },
             {
@@ -237,7 +331,7 @@ export default function RequestDetailsScreen() {
                         const { error } = await supabase
                             .from('delivery_requests')
                             .update({ status: 'cancelled' })
-                            .eq('id', id);
+                            .eq('id', requestId);
 
                         if (error) throw error;
                         Alert.alert('Cancelled', 'Request has been cancelled.');
@@ -251,9 +345,11 @@ export default function RequestDetailsScreen() {
     };
 
     const handleConfirmReceived = async () => {
+        if (!requestId) return;
+        const isRide = request?.request_type === 'ride';
         Alert.alert(
-            'Confirm Delivery?',
-            'Has the rider delivered your package? This will release the payment to them.',
+            isRide ? 'Confirm Arrival?' : 'Confirm Delivery?',
+            isRide ? 'Has the rider completed your trip? This will release the payment to them.' : 'Has the rider delivered your package? This will release the payment to them.',
             [
                 { text: 'No', style: 'cancel' },
                 {
@@ -263,7 +359,7 @@ export default function RequestDetailsScreen() {
                         setLoading(true);
                         try {
                             const { data, error } = await supabase.rpc('complete_delivery_job_v2', {
-                                p_request_id: id
+                                p_request_id: requestId
                             });
 
                             if (error) throw error;
@@ -284,6 +380,7 @@ export default function RequestDetailsScreen() {
     };
 
     const submitReview = async () => {
+        if (!requestId) return;
         if (rating === 0) {
             Alert.alert('Rating Required', 'Please select a star rating.');
             return;
@@ -291,28 +388,52 @@ export default function RequestDetailsScreen() {
 
         setSubmittingReview(true);
         try {
-            const { error } = await supabase.from('reviews').insert({
-                request_id: id,
-                reviewer_id: user?.id,
-                reviewee_id: request.rider_id,
-                role: 'user', // User reviewing rider
-                rating: rating,
-                comment: reviewComment
-            });
+            if (!request?.rider_id || !user?.id) {
+                throw new Error('Missing rider or reviewer details');
+            }
 
-            if (error) throw error;
+            if (reviewId) {
+                const { error } = await supabase
+                    .from('reviews')
+                    .update({
+                        rating: rating,
+                        comment: reviewComment || null
+                    })
+                    .eq('id', reviewId);
+
+                if (error) throw error;
+            } else {
+                const { data, error } = await supabase
+                    .from('reviews')
+                    .insert({
+                        request_id: requestId,
+                        reviewer_id: user.id,
+                        reviewee_id: request.rider_id,
+                        role: 'user',
+                        rating: rating,
+                        comment: reviewComment || null
+                    })
+                    .select('id')
+                    .single();
+
+                if (error) throw error;
+                setReviewId(data?.id || null);
+            }
 
             setReviewModalVisible(false);
+            setHasRatedRider(true);
             Alert.alert('Thank you!', 'Your review has been submitted.');
         } catch (error: any) {
-            Alert.alert('Error', 'Failed to submit review');
+            Alert.alert('Error', error?.message || 'Failed to submit review');
         } finally {
             setSubmittingReview(false);
         }
     };
 
+    const statusSteps = request?.request_type === 'ride' ? RIDE_STATUS_STEPS : PACKAGE_STATUS_STEPS;
+
     const getStatusIndex = (status: string) => {
-        return STATUS_STEPS.findIndex(s => s.key === status);
+        return statusSteps.findIndex(s => s.key === status);
     };
 
     const getStatusColor = (status: string) => {
@@ -357,6 +478,7 @@ export default function RequestDetailsScreen() {
 
     const statusIndex = getStatusIndex(request.status);
     const assignedRider = bids.find(b => b.rider_id === request.rider_id);
+    const isRideRequest = request.request_type === 'ride';
 
     return (
         <ThemedView style={[styles.container, { backgroundColor: bgColor }]}>
@@ -366,7 +488,7 @@ export default function RequestDetailsScreen() {
                     <Ionicons name="arrow-back" size={22} color={textColor} />
                 </TouchableOpacity>
                 <View style={styles.headerCenter}>
-                    <ThemedText style={[styles.headerTitle, { color: textColor }]}>Delivery Request</ThemedText>
+                    <ThemedText style={[styles.headerTitle, { color: textColor }]}>{isRideRequest ? 'Ride Request' : 'Delivery Request'}</ThemedText>
                 </View>
                 <TouchableOpacity onPress={handleCancelRequest} style={[styles.backBtn, { backgroundColor: '#fee2e2' }]}>
                     <Ionicons name="trash-outline" size={20} color={errorColor} />
@@ -400,7 +522,7 @@ export default function RequestDetailsScreen() {
                     {/* Status Timeline */}
                     {request.status !== 'cancelled' && (
                         <View style={styles.timeline}>
-                            {STATUS_STEPS.map((step, index) => {
+                            {statusSteps.map((step, index) => {
                                 const isActive = index <= statusIndex;
                                 const isCurrent = index === statusIndex;
                                 return (
@@ -412,7 +534,7 @@ export default function RequestDetailsScreen() {
                                         ]}>
                                             <Ionicons name={step.icon} size={16} color={isActive ? '#fff' : mutedText} />
                                         </View>
-                                        {index < STATUS_STEPS.length - 1 && (
+                                        {index < statusSteps.length - 1 && (
                                             <View style={[styles.timelineLine, { backgroundColor: index < statusIndex ? primary : borderColor }]} />
                                         )}
                                         <ThemedText style={[styles.timelineLabel, { color: isActive ? textColor : mutedText }]} numberOfLines={1}>
@@ -424,24 +546,6 @@ export default function RequestDetailsScreen() {
                         </View>
                     )}
                 </View>
-
-                {/* Delivery Code Display */}
-                {request?.delivery_code && request?.status !== 'delivered' && request?.status !== 'cancelled' && (
-                    <Reanimated.View
-                        entering={FadeInDown.delay(200).springify()}
-                        style={[styles.card, { backgroundColor: primary, alignItems: 'center', paddingVertical: 24 }]}
-                    >
-                        <ThemedText style={{ color: '#fff', fontSize: 13, fontWeight: '600', marginBottom: 4, opacity: 0.9 }}>
-                            SHARE WITH RIDER
-                        </ThemedText>
-                        <ThemedText style={{ color: '#fff', fontSize: 36, fontWeight: '800', letterSpacing: 6 }}>
-                            {request.delivery_code}
-                        </ThemedText>
-                        <ThemedText style={{ color: '#fff', fontSize: 11, opacity: 0.8, marginTop: 4 }}>
-                            Only share upon delivery arrival
-                        </ThemedText>
-                    </Reanimated.View>
-                )}
 
                 {/* Locations Card */}
                 <View style={[styles.card, { backgroundColor: cardBg, borderColor }]}>
@@ -477,40 +581,46 @@ export default function RequestDetailsScreen() {
                 <View style={[styles.card, { backgroundColor: cardBg, borderColor }]}>
                     <View style={styles.sectionHeaderRow}>
                         <View style={styles.sectionHeader}>
-                            <Ionicons name="cube" size={20} color={teal} />
-                            <ThemedText style={[styles.sectionTitle, { color: textColor }]}>Package & Pricing</ThemedText>
+                            <Ionicons name={isRideRequest ? 'car' : 'cube'} size={20} color={teal} />
+                            <ThemedText style={[styles.sectionTitle, { color: textColor }]}>{isRideRequest ? 'Ride & Pricing' : 'Package & Pricing'}</ThemedText>
                         </View>
-                        <TouchableOpacity onPress={handleUpdateImage}>
-                            <ThemedText style={{ color: primary, fontSize: 13, fontWeight: '600' }}>
-                                {request.item_image_url ? 'Change Photo' : 'Add Photo'}
-                            </ThemedText>
-                        </TouchableOpacity>
+                        {!isRideRequest && (
+                            <TouchableOpacity onPress={handleUpdateImage}>
+                                <ThemedText style={{ color: primary, fontSize: 13, fontWeight: '600' }}>
+                                    {request.item_image_url ? 'Change Photo' : 'Add Photo'}
+                                </ThemedText>
+                            </TouchableOpacity>
+                        )}
                     </View>
 
-                    {/* Package Image Display */}
-                    {request.item_image_url ? (
-                        <TouchableOpacity onPress={() => setViewingImage(request.item_image_url)}>
-                            <Image
-                                source={{ uri: request.item_image_url }}
-                                style={styles.packageImage}
-                                resizeMode="cover"
-                            />
-                            <View style={styles.zoomHint}>
-                                <Ionicons name="expand" size={16} color="#fff" />
-                            </View>
-                        </TouchableOpacity>
-                    ) : (
-                        <TouchableOpacity style={[styles.addPhotoPlaceholder, { backgroundColor: cardBgAlt, borderColor }]} onPress={handleUpdateImage}>
-                            <Ionicons name="camera-outline" size={32} color={mutedText} />
-                            <ThemedText style={[styles.addPhotoText, { color: mutedText }]}>No image provided</ThemedText>
-                        </TouchableOpacity>
-                    )}
+                    {/* Package Image Display - hide for rides */}
+                    {!isRideRequest && (
+                        <>
+                            {request.item_image_url ? (
+                                <TouchableOpacity onPress={() => setViewingImage(request.item_image_url)}>
+                                    <Image
+                                        source={{ uri: request.item_image_url }}
+                                        style={styles.packageImage}
+                                        resizeMode="cover"
+                                    />
+                                    <View style={styles.zoomHint}>
+                                        <Ionicons name="expand" size={16} color="#fff" />
+                                    </View>
+                                </TouchableOpacity>
+                            ) : (
+                                <TouchableOpacity style={[styles.addPhotoPlaceholder, { backgroundColor: cardBgAlt, borderColor }]} onPress={handleUpdateImage}>
+                                    <Ionicons name="camera-outline" size={32} color={mutedText} />
+                                    <ThemedText style={[styles.addPhotoText, { color: mutedText }]}>No image provided</ThemedText>
+                                </TouchableOpacity>
+                            )}
 
-                    {updatingImage && (
-                        <View style={styles.uploadingIndicator}>
-                            <ActivityIndicator size="small" color={primary} />
-                            <ThemedText style={{ marginLeft: 8, fontSize: 12, color: primary }}>Uploading...</ThemedText>
-                        </View>
+                            {updatingImage && (
+                                <View style={styles.uploadingIndicator}>
+                                    <ActivityIndicator size="small" color={primary} />
+                                    <ThemedText style={{ marginLeft: 8, fontSize: 12, color: primary }}>Uploading...</ThemedText>
+                                </View>
+                            )}
+                        </>
                     )}
 
                     <View style={styles.infoRow}>
@@ -526,7 +636,7 @@ export default function RequestDetailsScreen() {
                         )}
                     </View>
 
-                    {request.item_description && (
+                    {!isRideRequest && request.item_description && (
                         <View style={[styles.descriptionBox, { backgroundColor: cardBgAlt, borderColor }]}>
                             <ThemedText style={[styles.descriptionLabel, { color: mutedText }]}>Item Description</ThemedText>
                             <ThemedText style={[styles.descriptionText, { color: textColor }]}>{request.item_description}</ThemedText>
@@ -566,12 +676,25 @@ export default function RequestDetailsScreen() {
                                     </ThemedText>
                                 </View>
                             </View>
-                            <TouchableOpacity
-                                style={[styles.callBtn, { backgroundColor: success }]}
-                                onPress={() => handleCallRider(assignedRider.rider?.profile?.phone_number)}
-                            >
-                                <Ionicons name="call" size={20} color="#fff" />
-                            </TouchableOpacity>
+                            <View style={styles.riderActions}>
+                                <TouchableOpacity
+                                    style={[styles.callBtn, { backgroundColor: primary, opacity: openingChat ? 0.6 : 1 }]}
+                                    onPress={handleRiderChat}
+                                    disabled={openingChat}
+                                >
+                                    {openingChat ? (
+                                        <ActivityIndicator size="small" color="#fff" />
+                                    ) : (
+                                        <Ionicons name="chatbubble" size={20} color="#fff" />
+                                    )}
+                                </TouchableOpacity>
+                                <TouchableOpacity
+                                    style={[styles.callBtn, { backgroundColor: success }]}
+                                    onPress={handleRiderInAppCall}
+                                >
+                                    <Ionicons name="call" size={20} color="#fff" />
+                                </TouchableOpacity>
+                            </View>
                         </View>
 
                         <ThemedText style={[styles.agreedPrice, { color: success }]}>
@@ -584,8 +707,21 @@ export default function RequestDetailsScreen() {
                                 style={[styles.confirmBtn, { backgroundColor: primary }]}
                                 onPress={handleConfirmReceived}
                             >
-                                <ThemedText style={styles.confirmBtnText}>Confirm Delivery Received</ThemedText>
+                                <ThemedText style={styles.confirmBtnText}>{isRideRequest ? 'Confirm Trip Complete' : 'Confirm Delivery Received'}</ThemedText>
                             </TouchableOpacity>
+                        )}
+                        {request.status === 'delivered' && !hasRatedRider && (
+                            <TouchableOpacity
+                                style={[styles.confirmBtn, { backgroundColor: '#1F2050' }]}
+                                onPress={() => setReviewModalVisible(true)}
+                            >
+                                <ThemedText style={styles.confirmBtnText}>Rate Rider</ThemedText>
+                            </TouchableOpacity>
+                        )}
+                        {request.status === 'delivered' && hasRatedRider && (
+                            <View style={[styles.confirmBtn, { backgroundColor: '#6B7280', opacity: 0.85 }]}>
+                                <ThemedText style={styles.confirmBtnText}>Rider Rated</ThemedText>
+                            </View>
                         )}
                     </View>
                 )}
@@ -692,48 +828,12 @@ export default function RequestDetailsScreen() {
             )}
 
             {/* Review Modal */}
-            <Modal visible={reviewModalVisible} transparent={true} animationType="slide">
-                <View style={styles.modalOverlay}>
-                    <View style={[styles.reviewCard, { backgroundColor: cardBg }]}>
-                        <ThemedText style={[styles.reviewTitle, { color: textColor }]}>Rate your Rider</ThemedText>
-                        <ThemedText style={{ color: mutedText, textAlign: 'center', marginBottom: 20 }}>
-                            How was your experience with {bids.find(b => b.rider_id === request?.rider_id)?.rider?.profile?.first_name}?
-                        </ThemedText>
-
-                        <View style={styles.starsContainer}>
-                            {[1, 2, 3, 4, 5].map((star) => (
-                                <TouchableOpacity key={star} onPress={() => setRating(star)}>
-                                    <Ionicons
-                                        name={star <= rating ? "star" : "star-outline"}
-                                        size={32}
-                                        color={star <= rating ? "#FFD700" : mutedText}
-                                    />
-                                </TouchableOpacity>
-                            ))}
-                        </View>
-
-                        <View style={[styles.inputContainer, { backgroundColor: cardBgAlt, borderColor }]}>
-                            <ThemedText style={{ color: mutedText, marginBottom: 8 }}>Details (Optional)</ThemedText>
-                            <View style={{ padding: 10, borderWidth: 1, borderColor: borderColor, borderRadius: 8 }}>
-                                <ThemedText style={{ color: textColor }}>{/* Placeholder for TextInput, using simple view for now since TextInput wasn't imported or configured broadly */}</ThemedText>
-                                {/* Actual TextInput would go here, simplified for this step to avoid import issues if TextInput not heavily used */}
-                            </View>
-                            {/* Re-injecting TextInput correctly */}
-                        </View>
-
-                        {/* Replacing above placeholder with actual TextInput logic requires importing TextInput if not present.  
-                            Checking imports... TextInput IS imported. Good. */}
-                    </View>
-                </View>
-            </Modal>
-
-            {/* Review Modal Corrected */}
             <Modal visible={reviewModalVisible} transparent={true} animationType="fade" onRequestClose={() => setReviewModalVisible(false)}>
                 <View style={styles.modalOverlay}>
                     <View style={[styles.reviewCard, { backgroundColor: cardBg }]}>
                         <ThemedText style={[styles.reviewTitle, { color: textColor }]}>Rate your Rider</ThemedText>
                         <ThemedText style={{ color: mutedText, textAlign: 'center', marginBottom: 20 }}>
-                            How was your delivery experience?
+                            {isRideRequest ? 'How was your ride?' : 'How was your delivery experience?'}
                         </ThemedText>
 
                         <View style={styles.starsContainer}>
@@ -873,6 +973,7 @@ const styles = StyleSheet.create({
 
     // Rider
     riderInfo: { flexDirection: 'row', alignItems: 'center', gap: 14 },
+    riderActions: { flexDirection: 'row', alignItems: 'center', gap: 8 },
     riderPhoto: { width: 56, height: 56, borderRadius: 28, borderWidth: 2, borderColor: '#fff' },
     riderDetails: { flex: 1 },
     riderName: { fontSize: 17, fontWeight: '700', marginBottom: 4 },

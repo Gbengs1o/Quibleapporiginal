@@ -103,7 +103,7 @@ export default function OrdersScreen() {
         try {
             const { data: chatId, error } = await supabase.rpc('get_or_create_rider_order_chat', {
                 p_order_id: orderId,
-                p_chat_type: 'rider_restaurant'
+                p_chat_type: 'rider_store'
             });
 
             if (error) throw error;
@@ -125,14 +125,16 @@ export default function OrdersScreen() {
     const renderOrderItem = ({ item: order }: { item: any }) => {
         const isPickup = !order.dropoff_latitude;
         let action = STATUS_ACTIONS[order.status as OrderStatus];
+        const riderAcceptedAwaitingPickup = !isPickup && order.status === 'ready' && !!order.rider_id;
 
-        // Override action for Pickup orders (Ready -> Delivered directly)
-        if (isPickup && order.status === 'ready') {
-            action = { label: 'Mark Picked Up', next: 'delivered', color: '#10b981', icon: 'checkmark-done' };
+        // For pickup orders at 'ready' status, we will show two buttons below instead of overriding action here
+        const isManualPickupPossible = isPickup && order.status === 'ready';
+        if (riderAcceptedAwaitingPickup) {
+            action = { label: 'Verify Pickup', next: 'out_for_delivery', color: '#f27c22', icon: 'shield-checkmark', isSpecial: true, isVerify: true };
         }
 
         const statusColor = getStatusColor(order.status);
-        const hasRider = (order.status === 'with_rider' || order.status === 'out_for_delivery') && order.rider;
+        const hasRider = !!order.rider_id;
 
         return (
             <View style={[styles.card, { backgroundColor: cardBg, borderColor }]}>
@@ -140,7 +142,7 @@ export default function OrdersScreen() {
                 <View style={[styles.statusRibbon, { backgroundColor: statusColor }]}>
                     <Ionicons name={getStatusIcon(order.status) as any} size={14} color="#fff" />
                     <ThemedText style={styles.statusRibbonText}>
-                        {isPickup ? 'SELF PICKUP' : order.status.toUpperCase().replace('_', ' ')}
+                        {(isPickup && !hasRider) ? 'SELF PICKUP' : riderAcceptedAwaitingPickup ? 'RIDER ACCEPTED' : order.status.toUpperCase().replace('_', ' ')}
                     </ThemedText>
                 </View>
 
@@ -207,8 +209,8 @@ export default function OrdersScreen() {
                         <ThemedText style={styles.totalValue}>₦{order.total_amount.toLocaleString()}</ThemedText>
                     </View>
 
-                    {/* Rider Info Row (Only for Delivery) */}
-                    {hasRider && !isPickup && (
+                    {/* Rider Info Row (Visible if rider is assigned, even for pickup) */}
+                    {hasRider && (
                         <View style={styles.riderInfoRow}>
                             <View style={styles.riderInfoLeft}>
                                 {order.rider?.profile?.profile_picture_url ? (
@@ -220,7 +222,7 @@ export default function OrdersScreen() {
                                 )}
                                 <View>
                                     <ThemedText style={styles.riderNameSmall}>
-                                        {order.rider?.profile?.first_name} {order.rider?.profile?.last_name?.charAt(0)}.
+                                        {order.rider?.profile?.first_name ? `${order.rider.profile.first_name} ${order.rider?.profile?.last_name?.charAt(0) || ''}.` : 'Assigned Rider'}
                                     </ThemedText>
                                     <ThemedText style={[styles.riderVehicleSmall, { color: subtleText }]}>
                                         {order.rider?.vehicle_type || 'Rider'} • {order.rider?.vehicle_plate || ''}
@@ -261,7 +263,7 @@ export default function OrdersScreen() {
                         )}
 
                         {/* Call Rider Button (Only when rider is assigned) */}
-                        {((order.status === 'with_rider' || order.status === 'out_for_delivery') && order.rider_id) && !isPickup && (
+                        {((order.status === 'with_rider' || order.status === 'out_for_delivery' || riderAcceptedAwaitingPickup) && order.rider_id) && (
                             <TouchableOpacity
                                 style={styles.callButton}
                                 onPress={() => startCall(order.rider_id!)}
@@ -272,7 +274,7 @@ export default function OrdersScreen() {
                         )}
 
                         {/* Chat Button (Only when rider is assigned) */}
-                        {((order.status === 'with_rider' || order.status === 'out_for_delivery') && order.rider_id) && !isPickup && (
+                        {((order.status === 'with_rider' || order.status === 'out_for_delivery' || riderAcceptedAwaitingPickup) && order.rider_id) && (
                             <TouchableOpacity
                                 style={[styles.chatButton, { opacity: chatLoading === order.id ? 0.7 : 1 }]}
                                 onPress={() => openChat(order.id)}
@@ -292,6 +294,7 @@ export default function OrdersScreen() {
                             <TouchableOpacity
                                 style={styles.actionButton}
                                 onPress={() => {
+                                    if (!action) return;
                                     if (action.isSpecial) {
                                         if (action.isVerify) {
                                             setVerifyOrderId(order.id);
@@ -315,6 +318,24 @@ export default function OrdersScreen() {
                                 >
                                     <Ionicons name={action.icon as any} size={20} color="#fff" />
                                     <ThemedText style={styles.actionButtonText}>{action.label}</ThemedText>
+                                </LinearGradient>
+                            </TouchableOpacity>
+                        )}
+
+                        {isManualPickupPossible && (
+                            <TouchableOpacity
+                                style={styles.actionButton}
+                                onPress={() => handleAction(order.id, 'delivered')}
+                                activeOpacity={0.85}
+                            >
+                                <LinearGradient
+                                    colors={['#10b981', shadeColor('#10b981', -30)]}
+                                    start={{ x: 0, y: 0 }}
+                                    end={{ x: 1, y: 0 }}
+                                    style={styles.actionButtonGradient}
+                                >
+                                    <Ionicons name="checkmark-done" size={20} color="#fff" />
+                                    <ThemedText style={styles.actionButtonText}>Mark Picked Up</ThemedText>
                                 </LinearGradient>
                             </TouchableOpacity>
                         )}

@@ -180,14 +180,15 @@ export default function OrderDetailScreen() {
 
     // Update Route & Fit Map
     useEffect(() => {
-        if (!mapRef.current || !order?.restaurant) return;
+        const vendor = order?.store || order?.restaurant;
+        if (!mapRef.current || !vendor) return;
 
         const points = [];
-        // 1. Restaurant (Always there)
-        if (order.restaurant.latitude && order.restaurant.longitude) {
+        // 1. Pickup source (Store or Restaurant)
+        if (vendor.latitude && vendor.longitude) {
             points.push({
-                latitude: order.restaurant.latitude,
-                longitude: order.restaurant.longitude
+                latitude: vendor.latitude,
+                longitude: vendor.longitude
             });
         }
 
@@ -206,11 +207,11 @@ export default function OrderDetailScreen() {
 
         // Determine route line (Simple straight line for now)
         // If rider exists: Rider -> User
-        // Else: Restaurant -> User
-        if (userLocation && order.restaurant.latitude) {
+        // Else: Source -> User
+        if (userLocation && vendor.latitude) {
             const start = riderLocation || {
-                latitude: order.restaurant.latitude,
-                longitude: order.restaurant.longitude
+                latitude: vendor.latitude,
+                longitude: vendor.longitude
             };
             setRouteCoords([
                 start,
@@ -224,7 +225,7 @@ export default function OrderDetailScreen() {
                 animated: true,
             });
         }
-    }, [order?.restaurant, riderLocation, userLocation]);
+    }, [order?.restaurant, order?.store, riderLocation, userLocation]);
 
     const fetchOrder = async () => {
         try {
@@ -273,7 +274,8 @@ export default function OrderDetailScreen() {
             });
 
             if (error) throw error;
-            router.push(`/order-chat/${chatId}`);
+            const target = order?.store_id ? 'store' : 'restaurant';
+            router.push(`/order-chat/${chatId}?target=${target}`);
         } catch (error) {
             console.error('Chat error:', error);
             Alert.alert('Error', 'Failed to open chat');
@@ -285,7 +287,7 @@ export default function OrderDetailScreen() {
         if (phone) {
             Linking.openURL(`tel:${phone}`);
         } else {
-            Alert.alert('No Phone', 'Restaurant phone number not available');
+            Alert.alert('No Phone', `${order?.store_id ? 'Store' : 'Restaurant'} phone number not available`);
         }
     };
 
@@ -323,7 +325,7 @@ export default function OrderDetailScreen() {
 
     const handleSubmitReview = async () => {
         if (restaurantRating === 0 && riderRating === 0) {
-            Alert.alert('Rating Required', 'Please rate the restaurant or the rider');
+            Alert.alert('Rating Required', `Please rate the ${order?.store_id ? 'store' : 'restaurant'} or the rider`);
             return;
         }
 
@@ -331,13 +333,13 @@ export default function OrderDetailScreen() {
         try {
             const promises = [];
 
-            // 1. Submit Restaurant Review
+            // 1. Submit Store/Restaurant Review
             if (restaurantRating > 0 && !existingReview) {
                 const itemReviews = Object.entries(itemRatings)
                     .filter(([, val]) => val.rating > 0 || (val.comment && val.comment.trim().length > 0))
                     .map(([itemId, val]) => ({
                         order_item_id: itemId,
-                        rating: val.rating || 0, // Ensure rating is at least 0 if only comment is provided
+                        rating: val.rating > 0 ? val.rating : null,
                         comment: val.comment || null
                     }));
 
@@ -349,7 +351,7 @@ export default function OrderDetailScreen() {
                         p_item_reviews: itemReviews
                     }).then(({ data, error }) => {
                         if (error) throw error;
-                        if (!data?.success) throw new Error(data?.message || 'Failed to submit restaurant review');
+                        if (!data?.success) throw new Error(data?.message || `Failed to submit ${order?.store_id ? 'store' : 'restaurant'} review`);
                         setExistingReview({
                             restaurant_rating: restaurantRating,
                             restaurant_comment: restaurantComment,
@@ -435,7 +437,8 @@ export default function OrderDetailScreen() {
     };
 
     const renderMap = () => {
-        if (!order?.restaurant?.latitude || !order?.restaurant?.longitude) return null;
+        const vendor = order?.store || order?.restaurant;
+        if (!vendor?.latitude || !vendor?.longitude) return null;
         if (!userLocation && !riderLocation) return null; // Need at least one other point
 
         return (
@@ -445,8 +448,8 @@ export default function OrderDetailScreen() {
                     provider={PROVIDER_GOOGLE}
                     style={styles.map}
                     initialRegion={{
-                        latitude: order.restaurant.latitude,
-                        longitude: order.restaurant.longitude,
+                        latitude: vendor.latitude,
+                        longitude: vendor.longitude,
                         latitudeDelta: 0.05,
                         longitudeDelta: 0.05,
                     }}
@@ -458,17 +461,17 @@ export default function OrderDetailScreen() {
                         // ... simplified dark style
                     ] : []}
                 >
-                    {/* Restaurant Marker */}
+                    {/* Pickup Source Marker */}
                     <Marker
                         coordinate={{
-                            latitude: order.restaurant.latitude,
-                            longitude: order.restaurant.longitude
+                            latitude: vendor.latitude,
+                            longitude: vendor.longitude
                         }}
-                        title={order.restaurant.name}
-                        description="Order Pickup"
+                        title={vendor.name}
+                        description={`${order?.store_id ? 'Store' : 'Restaurant'} Pickup`}
                     >
                         <View style={[styles.markerContainer, { backgroundColor: colors.cardBg }]}>
-                            <Ionicons name="restaurant" size={16} color={colors.accent} />
+                            <Ionicons name={order?.store_id ? "storefront" : "restaurant"} size={16} color={colors.accent} />
                         </View>
                     </Marker>
 
@@ -545,6 +548,7 @@ export default function OrderDetailScreen() {
     }
 
     const isDelivered = order.status === 'delivered';
+    const vendorLabel = order.store_id ? 'Store' : 'Restaurant';
     const canReview = isDelivered && !existingReview;
 
     return (
@@ -621,7 +625,6 @@ export default function OrderDetailScreen() {
                         </View>
                         {renderTracker()}
 
-                        {/* Insert Map if Applicable */}
                         {(order.status === 'preparing' || order.status === 'ready' || order.status === 'with_rider') && renderMap()}
                     </Animated.View>
                 )}
@@ -630,9 +633,9 @@ export default function OrderDetailScreen() {
                 {order.delivery_code && !isDelivered && (
                     <Animated.View
                         entering={FadeInDown.delay(250).duration(400)}
-                        style={[styles.card, { backgroundColor: colors.accent, alignItems: 'center', paddingVertical: 24 }]}
+                        style={[styles.card, { backgroundColor: colors.accent, alignItems: 'center', paddingVertical: 28 }]}
                     >
-                        <ThemedText style={{ color: '#fff', fontSize: 13, fontWeight: '600', marginBottom: 10, opacity: 0.9, letterSpacing: 1 }}>
+                        <ThemedText style={{ color: '#fff', fontSize: 13, fontWeight: '600', marginBottom: 12, opacity: 0.9, letterSpacing: 1 }}>
                             SHARE WITH RIDER
                         </ThemedText>
                         <View style={{ flexDirection: 'row', gap: 10 }}>
@@ -644,6 +647,7 @@ export default function OrderDetailScreen() {
                                 }}>
                                     <Text style={{
                                         color: '#fff', fontSize: 30, fontWeight: '800',
+                                        lineHeight: 40,
                                         fontFamily: Platform.OS === 'ios' ? 'Courier' : 'monospace',
                                     }}>
                                         {digit}
@@ -651,7 +655,7 @@ export default function OrderDetailScreen() {
                                 </View>
                             ))}
                         </View>
-                        <ThemedText style={{ color: '#fff', fontSize: 11, opacity: 0.8, marginTop: 10 }}>
+                        <ThemedText style={{ color: '#fff', fontSize: 11, opacity: 0.8, marginTop: 12 }}>
                             Only share upon delivery arrival
                         </ThemedText>
                     </Animated.View>
@@ -740,7 +744,7 @@ export default function OrderDetailScreen() {
 
                         {existingReview ? (
                             <View>
-                                <ThemedText style={[styles.ratingSectionTitle, { color: colors.text, fontSize: 13, marginTop: 4 }]}>Restaurant</ThemedText>
+                                <ThemedText style={[styles.ratingSectionTitle, { color: colors.text, fontSize: 13, marginTop: 4 }]}>{vendorLabel}</ThemedText>
                                 {renderStars(existingReview.restaurant_rating, () => { }, 20)}
                                 {existingReview.restaurant_comment && (
                                     <ThemedText style={[styles.reviewComment, { color: colors.textSecondary }]}>
@@ -798,14 +802,14 @@ export default function OrderDetailScreen() {
                         </View>
 
                         <ScrollView showsVerticalScrollIndicator={false}>
-                            {/* Restaurant Rating */}
+                            {/* Store/Restaurant Rating */}
                             {!existingReview && (
                                 <View style={styles.ratingSection}>
-                                    <ThemedText style={[styles.ratingSectionTitle, { color: colors.text }]}>Restaurant</ThemedText>
+                                    <ThemedText style={[styles.ratingSectionTitle, { color: colors.text }]}>{vendorLabel}</ThemedText>
                                     {renderStars(restaurantRating, setRestaurantRating, 36)}
                                     <TextInput
                                         style={[styles.commentInput, { backgroundColor: colors.bg, color: colors.text, borderColor: colors.cardBorder }]}
-                                        placeholder="Share your experience..."
+                                        placeholder={`Share your ${order.store_id ? 'shopping' : 'dining'} experience...`}
                                         placeholderTextColor={colors.textMuted}
                                         value={restaurantComment}
                                         onChangeText={setRestaurantComment}
@@ -846,7 +850,7 @@ export default function OrderDetailScreen() {
                             {showItemRatings && order.items?.map((item: any) => (
                                 <View key={item.id} style={[styles.itemRatingCard, { backgroundColor: colors.bg }]}>
                                     <ThemedText style={[styles.itemRatingName, { color: colors.text }]}>
-                                        {item.menu_item?.name}
+                                        {item.menu_item?.name || item.store_item?.name || 'Item'}
                                     </ThemedText>
                                     {renderStars(
                                         itemRatings[item.id]?.rating || 0,

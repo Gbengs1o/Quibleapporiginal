@@ -2,11 +2,11 @@ import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { useAuth } from '@/contexts/auth';
 import { useCart } from '@/contexts/cart';
-import { useOrders } from '@/contexts/order'; // Added
+import { CartCheckoutOrderInput, useOrders } from '@/contexts/order';
 import { useWallet } from '@/contexts/wallet';
 import { useTheme } from '@/hooks/use-theme';
 import { useThemeColor } from '@/hooks/use-theme-color';
-import { supabase } from '@/utils/supabase'; // Re-adding
+import { supabase } from '@/utils/supabase';
 import { Ionicons } from '@expo/vector-icons';
 import { BlurView } from 'expo-blur';
 import * as Location from 'expo-location';
@@ -26,11 +26,32 @@ import {
 import Animated, { ZoomIn, useAnimatedStyle, withRepeat, withSequence, withTiming } from 'react-native-reanimated';
 import { initializeTransaction, verifyTransaction } from '../utils/monnify';
 
+type GroupedVendorOrder = {
+    vendor_type: 'restaurant' | 'store';
+    vendor_id: string;
+    vendor_name: string;
+    pickup_lat: number | null;
+    pickup_lng: number | null;
+    dropoff_lat: number | null;
+    dropoff_lng: number | null;
+    delivery_fee: number;
+    item_subtotal: number;
+    service_fee: number;
+    total_amount: number;
+    items: Array<{
+        menu_item_id?: string;
+        store_item_id?: string;
+        quantity: number;
+        price: number;
+        options?: string;
+    }>;
+};
+
 export default function OrdersScreen() {
     const router = useRouter();
     const { theme } = useTheme();
     const isDark = theme === 'dark';
-    const { items, updateQuantity, removeFromCart, clearCart, getTotal } = useCart();
+    const { items, updateQuantity, removeFromCart, clearCart } = useCart();
     const { session } = useAuth();
 
     const cardBg = useThemeColor({ light: '#fff', dark: '#1c1c1e' }, 'background');
@@ -39,7 +60,7 @@ export default function OrdersScreen() {
     const borderColor = useThemeColor({ light: 'rgba(0,0,0,0.08)', dark: 'rgba(255,255,255,0.1)' }, 'background');
     const inputBg = useThemeColor({ light: '#f5f5f5', dark: '#2c2c2e' }, 'background');
 
-    const { activeWallet, refreshWallet, fundWallet } = useWallet();
+    const { activeWallet, refreshWallet } = useWallet();
     const [isPaying, setIsPaying] = useState(false);
     const [showPaymentModal, setShowPaymentModal] = useState(false);
     const [paymentStatus, setPaymentStatus] = useState<'none' | 'processing' | 'success' | 'error'>('none');
@@ -48,10 +69,11 @@ export default function OrdersScreen() {
     const [statusRef, setStatusRef] = useState('');
     const [showClosedModal, setShowClosedModal] = useState(false);
     const [closedRestaurantName, setClosedRestaurantName] = useState('');
+    const [closedVendorType, setClosedVendorType] = useState<'restaurant' | 'store'>('restaurant');
     const [isDelivery, setIsDelivery] = useState(true);
     const [userLocation, setUserLocation] = useState<{ latitude: number; longitude: number } | null>(null);
-    const [deliveryFee, setDeliveryFee] = useState(0);
     const [feeConfig, setFeeConfig] = useState({ food_base_fee: 500, food_per_km_rate: 100 });
+    const [feeConfigLoaded, setFeeConfigLoaded] = useState(false);
 
     // Fetch delivery fee config + location on mount
     useEffect(() => {
@@ -72,54 +94,96 @@ export default function OrdersScreen() {
                 if (data) setFeeConfig(data);
             } catch (err) {
                 console.log('Fee config fetch failed, using defaults', err);
+            } finally {
+                setFeeConfigLoaded(true);
             }
         })();
     }, []);
 
     const calculateDistance = (lat1: number, lon1: number, lat2: number, lon2: number) => {
-        if (!lat1 || !lon1 || !lat2 || !lon2) return 0;
+        if (![lat1, lon1, lat2, lon2].every((value) => Number.isFinite(value))) return 0;
         const R = 6371;
         const dLat = (lat2 - lat1) * Math.PI / 180;
         const dLon = (lon2 - lon1) * Math.PI / 180;
         const a = Math.sin(dLat / 2) * Math.sin(dLat / 2) + Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) * Math.sin(dLon / 2) * Math.sin(dLon / 2);
         return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
     };
-
-    // Calculate Delivery Fee whenever items or mode changes
-    useEffect(() => {
-        if (!isDelivery || !userLocation || items.length === 0) {
-            setDeliveryFee(0);
-            return;
+    const buildGroupedOrders = (): { groups: GroupedVendorOrder[]; invalidItemIds: string[] } => {
+        const groupsByVendor = new Map<string, Omit<GroupedVendorOrder, 'service_fee' | 'total_amount'>>();
+        const invalidItemIds: string[] = [];
+        for (const cartItem of items) {
+            const isFood = cartItem.type === 'food';
+            const vendor = isFood ? cartItem.restaurant : cartItem.store;
+            const hasVendorCoordinates =
+                typeof vendor?.latitude === 'number' &&
+                Number.isFinite(vendor.latitude) &&
+                typeof vendor?.longitude === 'number' &&
+                Number.isFinite(vendor.longitude);
+            if (!cartItem.itemId || !vendor?.id || (isDelivery && !hasVendorCoordinates)) {
+                invalidItemIds.push(cartItem.id);
+                continue;
+            }
+            const vendorType = isFood ? 'restaurant' : 'store';
+            const key = `${vendorType}:${vendor.id}`;
+            if (!groupsByVendor.has(key)) {
+                let vendorDeliveryFee = 0;
+                if (isDelivery && userLocation && hasVendorCoordinates) {
+                    const dist = calculateDistance(
+                        userLocation.latitude,
+                        userLocation.longitude,
+                        vendor.latitude,
+                        vendor.longitude
+                    );
+                    vendorDeliveryFee = Math.round(feeConfig.food_base_fee + (dist * feeConfig.food_per_km_rate));
+                }
+                groupsByVendor.set(key, {
+                    vendor_type: vendorType,
+                    vendor_id: vendor.id,
+                    vendor_name: vendor.name,
+                    pickup_lat: hasVendorCoordinates ? vendor.latitude : null,
+                    pickup_lng: hasVendorCoordinates ? vendor.longitude : null,
+                    dropoff_lat: isDelivery ? userLocation?.latitude ?? null : null,
+                    dropoff_lng: isDelivery ? userLocation?.longitude ?? null : null,
+                    delivery_fee: vendorDeliveryFee,
+                    item_subtotal: 0,
+                    items: [],
+                });
+            }
+            const group = groupsByVendor.get(key)!;
+            const itemTotal = cartItem.price * cartItem.quantity;
+            group.item_subtotal += itemTotal;
+            if (isFood) {
+                group.items.push({
+                    menu_item_id: cartItem.itemId,
+                    quantity: cartItem.quantity,
+                    price: cartItem.price,
+                    options: ''
+                });
+            } else {
+                group.items.push({
+                    store_item_id: cartItem.itemId,
+                    quantity: cartItem.quantity,
+                    price: cartItem.price,
+                    options: ''
+                });
+            }
         }
-
-        // Get unique vendors (restaurants and stores)
-        const restaurants = Array.from(new Set(items.filter(i => i.type === 'food').map(i => i.restaurant?.id)))
-            .map(id => items.find(i => i.restaurant?.id === id)!.restaurant!);
-
-        const stores = Array.from(new Set(items.filter(i => i.type === 'store').map(i => i.store?.id)))
-            .map(id => items.find(i => i.store?.id === id)!.store!);
-
-        let totalFee = 0;
-        restaurants.forEach(rest => {
-            const dist = calculateDistance(userLocation.latitude, userLocation.longitude, rest.latitude, rest.longitude);
-            const fee = feeConfig.food_base_fee + (dist * feeConfig.food_per_km_rate);
-            totalFee += fee;
+        const groups: GroupedVendorOrder[] = Array.from(groupsByVendor.values()).map((group) => {
+            const service_fee = group.item_subtotal * 0.10;
+            return {
+                ...group,
+                service_fee,
+                total_amount: group.item_subtotal + service_fee + group.delivery_fee
+            };
         });
-
-        stores.forEach(store => {
-            const dist = calculateDistance(userLocation.latitude, userLocation.longitude, store.latitude, store.longitude);
-            const fee = feeConfig.food_base_fee + (dist * feeConfig.food_per_km_rate); // Use same rates for now
-            totalFee += fee;
-        });
-
-        setDeliveryFee(Math.round(totalFee));
-    }, [items, isDelivery, userLocation]);
-
-    // Calculate Totals
-    const subtotal = getTotal();
-    const serviceFee = subtotal * 0.10;
+        return { groups, invalidItemIds: Array.from(new Set(invalidItemIds)) };
+    };
+    const { groups: groupedOrders, invalidItemIds } = buildGroupedOrders();
+    const calculatingFee = isDelivery && items.length > 0 && !feeConfigLoaded;
+    const subtotal = groupedOrders.reduce((sum, group) => sum + group.item_subtotal, 0);
+    const serviceFee = groupedOrders.reduce((sum, group) => sum + group.service_fee, 0);
+    const deliveryFee = isDelivery ? groupedOrders.reduce((sum, group) => sum + group.delivery_fee, 0) : 0;
     const totalAmount = subtotal + serviceFee + deliveryFee;
-
     const handleClearCart = () => {
         Alert.alert(
             'Clear Cart',
@@ -134,9 +198,46 @@ export default function OrdersScreen() {
     const handleCheckout = async () => {
         if (items.length === 0) return;
 
-        // NEW: Check if restaurants and stores are open
-        const uniqueRestaurantIds = Array.from(new Set(items.filter(i => i.type === 'food').map(i => i.restaurant?.id)));
-        const uniqueStoreIds = Array.from(new Set(items.filter(i => i.type === 'store').map(i => i.store?.id)));
+        if (!session) {
+            Alert.alert(
+                'Login Required',
+                'You need to sign in to place an order.',
+                [
+                    { text: 'Cancel', style: 'cancel' },
+                    { text: 'Sign In', onPress: () => router.push('/(auth)/login') }
+                ]
+            );
+            return;
+        }
+
+        if (invalidItemIds.length > 0) {
+            invalidItemIds.forEach(removeFromCart);
+            Alert.alert(
+                'Cart Updated',
+                'Some unavailable or invalid items were removed from your cart. Please review and try again.'
+            );
+            return;
+        }
+
+        if (groupedOrders.length === 0) {
+            Alert.alert('Cart Empty', 'No valid items are available for checkout.');
+            return;
+        }
+
+        if (isDelivery && !userLocation) {
+            Alert.alert(
+                'Location Required',
+                'Enable location to calculate delivery fees for each restaurant/store, or switch to pickup.'
+            );
+            return;
+        }
+
+        const uniqueRestaurantIds = groupedOrders
+            .filter((group) => group.vendor_type === 'restaurant')
+            .map((group) => group.vendor_id);
+        const uniqueStoreIds = groupedOrders
+            .filter((group) => group.vendor_type === 'store')
+            .map((group) => group.vendor_id);
 
         try {
             if (uniqueRestaurantIds.length > 0) {
@@ -148,6 +249,7 @@ export default function OrdersScreen() {
                 if (restaurants) {
                     const closedRestaurant = restaurants.find(r => r.is_open === false);
                     if (closedRestaurant) {
+                        setClosedVendorType('restaurant');
                         setClosedRestaurantName(closedRestaurant.name);
                         setShowClosedModal(true);
                         return;
@@ -164,7 +266,8 @@ export default function OrdersScreen() {
                 if (stores) {
                     const closedStore = stores.find(s => s.is_open === false);
                     if (closedStore) {
-                        setClosedRestaurantName(closedStore.name); // Reusing state for now
+                        setClosedVendorType('store');
+                        setClosedRestaurantName(closedStore.name);
                         setShowClosedModal(true);
                         return;
                     }
@@ -172,18 +275,6 @@ export default function OrdersScreen() {
             }
         } catch (err) {
             console.error("Error checking vendor status", err);
-        }
-
-        if (!session) {
-            Alert.alert(
-                'Login Required',
-                'You need to sign in to place an order.',
-                [
-                    { text: 'Cancel', style: 'cancel' },
-                    { text: 'Sign In', onPress: () => router.push('/(auth)/login') }
-                ]
-            );
-            return;
         }
 
         setShowPaymentModal(true);
@@ -270,7 +361,7 @@ export default function OrdersScreen() {
         }
     };
 
-    const { placeOrder, placeStoreOrder } = useOrders();
+    const { placeCartOrders } = useOrders();
 
     const processWalletPayment = async () => {
         if (!activeWallet) {
@@ -295,99 +386,52 @@ export default function OrdersScreen() {
             return;
         }
 
+        if (invalidItemIds.length > 0) {
+            invalidItemIds.forEach(removeFromCart);
+            Alert.alert(
+                'Cart Updated',
+                'Some unavailable or invalid items were removed from your cart. Please review and try again.'
+            );
+            return;
+        }
+
+        if (groupedOrders.length === 0) {
+            Alert.alert('Cart Empty', 'No valid items available for checkout.');
+            return;
+        }
+
+        if (isDelivery && !userLocation) {
+            Alert.alert(
+                'Location Required',
+                'Enable location to calculate delivery fees for each vendor, or switch to pickup.'
+            );
+            return;
+        }
+
         setIsPaying(true);
         try {
-            // Group items by restaurant
-            const ordersByRestaurant = items.filter(i => i.type === 'food').reduce((acc, item) => {
-                const rId = item.restaurant?.id || '';
-                if (!acc[rId]) {
-                    acc[rId] = { restaurantId: rId, amount: 0, items: [] };
-                }
-                const itemTotal = item.price * item.quantity;
-                acc[rId].amount += itemTotal;
-                acc[rId].items.push({
-                    menu_item_id: item.itemId,
-                    quantity: item.quantity,
-                    price: item.price,
-                    options: ''
-                });
-                return acc;
-            }, {} as Record<string, { restaurantId: string, amount: number, items: any[] }>);
+            const payload: CartCheckoutOrderInput[] = groupedOrders.map((group) => ({
+                vendor_type: group.vendor_type,
+                vendor_id: group.vendor_id,
+                total_amount: group.total_amount,
+                delivery_fee: group.delivery_fee,
+                pickup_lat: group.pickup_lat,
+                pickup_lng: group.pickup_lng,
+                dropoff_lat: group.dropoff_lat,
+                dropoff_lng: group.dropoff_lng,
+                items: group.items
+            }));
 
-            // Group items by store
-            const ordersByStore = items.filter(i => i.type === 'store').reduce((acc, item) => {
-                const sId = item.store?.id || '';
-                if (!acc[sId]) {
-                    acc[sId] = { storeId: sId, amount: 0, items: [] };
-                }
-                const itemTotal = item.price * item.quantity;
-                acc[sId].amount += itemTotal;
-                acc[sId].items.push({
-                    store_item_id: item.itemId,
-                    quantity: item.quantity,
-                    price: item.price,
-                    options: ''
-                });
-                return acc;
-            }, {} as Record<string, { storeId: string, amount: number, items: any[] }>);
-
-            // Process each restaurant order
-            for (const rId in ordersByRestaurant) {
-                const order = ordersByRestaurant[rId];
-                let restaurantDeliveryFee = 0;
-                if (isDelivery && userLocation) {
-                    const rest = items.find(i => i.restaurant?.id === rId)?.restaurant;
-                    if (rest) {
-                        const dist = calculateDistance(userLocation.latitude, userLocation.longitude, rest.latitude, rest.longitude);
-                        restaurantDeliveryFee = feeConfig.food_base_fee + (dist * feeConfig.food_per_km_rate);
-                    }
-                }
-
-                // Calculate total with service fee and delivery fee for THIS order
-                const orderTotal = order.amount + (order.amount * 0.10) + restaurantDeliveryFee;
-
-                const rest = items.find(i => i.restaurant?.id === rId)?.restaurant;
-                const locationData = {
-                    pickup_lat: rest?.latitude,
-                    pickup_lng: rest?.longitude,
-                    dropoff_lat: isDelivery ? userLocation?.latitude : undefined,
-                    dropoff_lng: isDelivery ? userLocation?.longitude : undefined
-                };
-
-                await placeOrder(rId, orderTotal, order.items, locationData);
-            }
-
-            // Process each store order
-            for (const sId in ordersByStore) {
-                const order = ordersByStore[sId];
-                let storeDeliveryFee = 0;
-                if (isDelivery && userLocation) {
-                    const store = items.find(i => i.store?.id === sId)?.store;
-                    if (store) {
-                        const dist = calculateDistance(userLocation.latitude, userLocation.longitude, store.latitude, store.longitude);
-                        storeDeliveryFee = feeConfig.food_base_fee + (dist * feeConfig.food_per_km_rate);
-                    }
-                }
-
-                const orderTotal = order.amount + (order.amount * 0.10) + storeDeliveryFee;
-
-                const store = items.find(i => i.store?.id === sId)?.store;
-                const locationData = {
-                    pickup_lat: store?.latitude,
-                    pickup_lng: store?.longitude,
-                    dropoff_lat: isDelivery ? userLocation?.latitude : undefined,
-                    dropoff_lng: isDelivery ? userLocation?.longitude : undefined
-                };
-
-                await placeStoreOrder(sId, orderTotal, order.items, locationData);
-            }
+            const createdOrderIds = await placeCartOrders(payload);
 
             setPaymentStatus('success');
             setStatusTitle('Order Placed!');
-            setStatusMessage('Track your delicious meal in the Orders tab.');
+            setStatusMessage(
+                `Placed ${createdOrderIds.length || groupedOrders.length} order(s) successfully. Track them in the Orders tab.`
+            );
 
             clearCart();
-            refreshWallet();
+            await refreshWallet();
             // We delay the navigation slightly so the user can see the success state
             setTimeout(() => {
                 setPaymentStatus('none');
@@ -548,18 +592,44 @@ export default function OrdersScreen() {
                             </View>
 
                             {isDelivery && (
-                                <View style={styles.summaryRow}>
-                                    <View style={styles.deliveryLabelContainer}>
-                                        <ThemedText style={[styles.summaryLabel, { color: secondaryText }]}>
-                                            Delivery Fee
-                                        </ThemedText>
-                                        <ThemedText style={styles.distanceSubtext}>
-                                            (Based on distance)
-                                        </ThemedText>
+                                <View>
+                                    <View style={styles.summaryRow}>
+                                        <View style={styles.deliveryLabelContainer}>
+                                            <ThemedText style={[styles.summaryLabel, { color: secondaryText }]}>
+                                                Delivery Fee
+                                            </ThemedText>
+                                            <ThemedText style={styles.distanceSubtext}>
+                                                (Based on distance)
+                                            </ThemedText>
+                                        </View>
+                                        {calculatingFee ? (
+                                            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                                                <ActivityIndicator size="small" color="#f27c22" />
+                                                <ThemedText style={[styles.summaryValue, { color: '#f27c22', fontSize: 12 }]}>
+                                                    Calculating...
+                                                </ThemedText>
+                                            </View>
+                                        ) : (
+                                            <ThemedText style={[styles.summaryValue, { color: '#f27c22' }]}>
+                                                ₦{deliveryFee.toLocaleString()}
+                                            </ThemedText>
+                                        )}
                                     </View>
-                                    <ThemedText style={[styles.summaryValue, { color: '#f27c22' }]}>
-                                        ₦{deliveryFee.toLocaleString()}
-                                    </ThemedText>
+                                    {/* Per-vendor breakdown when multiple vendors */}
+                                    {!calculatingFee && groupedOrders.length > 1 && (
+                                        <View style={{ paddingLeft: 8, marginTop: 4, gap: 2 }}>
+                                            {groupedOrders.map((group) => (
+                                                <View key={group.vendor_type + '-' + group.vendor_id} style={{ flexDirection: 'row', justifyContent: 'space-between', paddingVertical: 2 }}>
+                                                    <ThemedText style={{ fontSize: 12, color: secondaryText }} numberOfLines={1}>
+                                                        {group.vendor_type === 'restaurant' ? 'Restaurant' : 'Store'}: {group.vendor_name}
+                                                    </ThemedText>
+                                                    <ThemedText style={{ fontSize: 12, color: '#f27c22' }}>
+                                                        {"\u20A6"}{group.delivery_fee.toLocaleString()}
+                                                    </ThemedText>
+                                                </View>
+                                            ))}
+                                        </View>
+                                    )}
                                 </View>
                             )}
 
@@ -587,12 +657,17 @@ export default function OrdersScreen() {
                             </ThemedText>
                         </View>
                         <TouchableOpacity
-                            style={[styles.checkoutButton, isPaying && { opacity: 0.7 }]}
+                            style={[styles.checkoutButton, (isPaying || (isDelivery && calculatingFee)) && { opacity: 0.5 }]}
                             onPress={handleCheckout}
-                            disabled={isPaying}
+                            disabled={isPaying || (isDelivery && calculatingFee)}
                         >
                             {isPaying ? (
                                 <ActivityIndicator color="#fff" />
+                            ) : (isDelivery && calculatingFee) ? (
+                                <>
+                                    <ActivityIndicator color="#fff" size="small" style={{ marginRight: 8 }} />
+                                    <ThemedText style={styles.checkoutButtonText}>Calculating Fee...</ThemedText>
+                                </>
                             ) : (
                                 <>
                                     <ThemedText style={styles.checkoutButtonText}>Pay</ThemedText>
@@ -736,7 +811,9 @@ export default function OrdersScreen() {
                                 <AnimatedEmoji emoji="😔" />
                             </View>
 
-                            <ThemedText style={styles.statusTitle}>Restaurant Closed</ThemedText>
+                            <ThemedText style={styles.statusTitle}>
+                                {closedVendorType === 'store' ? 'Store Closed' : 'Restaurant Closed'}
+                            </ThemedText>
                             <ThemedText style={styles.statusMessage}>
                                 Sorry, <ThemedText style={{ fontWeight: '700' }}>{closedRestaurantName}</ThemedText> is currently closed and not accepting orders.
                             </ThemedText>
@@ -1181,3 +1258,4 @@ const styles = StyleSheet.create({
         fontWeight: 'bold',
     },
 });
+

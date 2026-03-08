@@ -100,6 +100,17 @@ export default function Step4Kin() {
 
             if (error) throw error;
 
+            // Belt-and-suspenders: ensure rider wallet exists immediately after rider creation.
+            // Backend trigger also handles this, but we call explicitly for reliability across environments.
+            if (session?.user.id) {
+                const { error: walletError } = await supabase.rpc('ensure_rider_wallet', {
+                    p_user_id: session.user.id
+                });
+                if (walletError) {
+                    console.warn('Could not pre-create rider wallet after registration:', walletError.message);
+                }
+            }
+
             // 3. Success!
             Alert.alert(
                 'Registration Complete',

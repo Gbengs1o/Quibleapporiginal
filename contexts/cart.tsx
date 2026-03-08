@@ -29,7 +29,7 @@ export interface CartItem {
 
 interface CartContextType {
     items: CartItem[];
-    addToCart: (item: Omit<CartItem, 'id' | 'quantity'>) => void;
+    addToCart: (item: Omit<CartItem, 'id' | 'quantity'> & { quantity?: number }) => void;
     removeFromCart: (id: string) => void;
     removeByItemId: (itemId: string) => void;
     updateQuantity: (id: string, quantity: number) => void;
@@ -37,11 +37,32 @@ interface CartContextType {
     getItemCount: () => number;
     getTotal: () => number;
     isInCart: (itemId: string) => boolean;
+    getItem: (itemId: string) => CartItem | undefined;
 }
 
 const CartContext = createContext<CartContextType | undefined>(undefined);
 
 const CART_STORAGE_KEY = '@quible_cart';
+
+const hasValidCoordinates = (vendor: any) =>
+    typeof vendor?.latitude === 'number' && Number.isFinite(vendor.latitude) &&
+    typeof vendor?.longitude === 'number' && Number.isFinite(vendor.longitude);
+
+const isValidCartItem = (item: any): item is CartItem => {
+    if (!item || typeof item !== 'object') return false;
+    if (typeof item.itemId !== 'string' || !item.itemId) return false;
+    if (typeof item.id !== 'string' || !item.id) return false;
+    if (typeof item.name !== 'string' || !item.name) return false;
+    if (typeof item.price !== 'number' || !Number.isFinite(item.price)) return false;
+    if (typeof item.quantity !== 'number' || item.quantity <= 0) return false;
+    if (item.type !== 'food' && item.type !== 'store') return false;
+
+    if (item.type === 'food') {
+        return !!(item.restaurant?.id && hasValidCoordinates(item.restaurant));
+    }
+
+    return !!(item.store?.id && hasValidCoordinates(item.store));
+};
 
 export const CartProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
     const [items, setItems] = useState<CartItem[]>([]);
@@ -68,7 +89,11 @@ export const CartProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
                     // If dish becomes inactive, remove it from cart silently
                     if (!updatedDish.is_active) {
-                        setItems(prev => prev.filter(item => item.dishId !== updatedDish.id));
+                        setItems(prev =>
+                            prev.filter(item =>
+                                !(item.type === 'food' && item.itemId === updatedDish.id)
+                            )
+                        );
                     }
                 }
             )
@@ -78,7 +103,38 @@ export const CartProvider: React.FC<{ children: React.ReactNode }> = ({ children
                 (payload: any) => {
                     const deletedDish = payload.old as any;
                     // Remove deleted dish from cart
-                    setItems(prev => prev.filter(item => item.dishId !== deletedDish.id));
+                    setItems(prev =>
+                        prev.filter(item =>
+                            !(item.type === 'food' && item.itemId === deletedDish.id)
+                        )
+                    );
+                }
+            )
+            .on(
+                'postgres_changes',
+                { event: 'UPDATE', schema: 'public', table: 'store_items' },
+                (payload: any) => {
+                    const updatedStoreItem = payload.new as any;
+                    // Remove inactive or out-of-stock store items
+                    if (!updatedStoreItem.is_active || updatedStoreItem.stock_quantity <= 0) {
+                        setItems(prev =>
+                            prev.filter(item =>
+                                !(item.type === 'store' && item.itemId === updatedStoreItem.id)
+                            )
+                        );
+                    }
+                }
+            )
+            .on(
+                'postgres_changes',
+                { event: 'DELETE', schema: 'public', table: 'store_items' },
+                (payload: any) => {
+                    const deletedStoreItem = payload.old as any;
+                    setItems(prev =>
+                        prev.filter(item =>
+                            !(item.type === 'store' && item.itemId === deletedStoreItem.id)
+                        )
+                    );
                 }
             )
             .subscribe();
@@ -91,10 +147,19 @@ export const CartProvider: React.FC<{ children: React.ReactNode }> = ({ children
             const stored = await AsyncStorage.getItem(CART_STORAGE_KEY);
             if (stored) {
                 const parsedItems = JSON.parse(stored);
-                // Self-healing: Remove items with missing itemId or required vendor info
-                const validItems = parsedItems.filter((i: any) =>
-                    i.itemId && (i.restaurant || i.store)
-                );
+                if (!Array.isArray(parsedItems)) {
+                    setItems([]);
+                    return;
+                }
+
+                // Self-healing: remove malformed legacy rows.
+                const validItems = parsedItems.filter(isValidCartItem);
+
+                // Keep storage clean if we dropped invalid rows.
+                if (validItems.length !== parsedItems.length) {
+                    await AsyncStorage.setItem(CART_STORAGE_KEY, JSON.stringify(validItems));
+                }
+
                 setItems(validItems);
             }
         } catch (error) {
@@ -110,40 +175,46 @@ export const CartProvider: React.FC<{ children: React.ReactNode }> = ({ children
         }
     };
 
-    const addToCart = (item: Omit<CartItem, 'id' | 'quantity'>) => {
-        const existingItem = items.find(i => i.itemId === item.itemId);
+    const addToCart = (item: Omit<CartItem, 'id' | 'quantity'> & { quantity?: number }) => {
+        if (!item?.itemId || (item.type === 'food' && !item.restaurant?.id) || (item.type === 'store' && !item.store?.id)) {
+            console.warn('Ignoring invalid cart item payload', item);
+            return;
+        }
+        setItems((prev) => {
+            const existingItem = prev.find(i => i.itemId === item.itemId && i.type === item.type);
+            if (existingItem) {
+                return prev.map(i =>
+                    i.itemId === item.itemId && i.type === item.type
+                        ? { ...i, quantity: i.quantity + (item.quantity || 1) }
+                        : i
+                );
+            }
 
-        if (existingItem) {
-            setItems(items.map(i =>
-                i.itemId === item.itemId
-                    ? { ...i, quantity: i.quantity + (item.quantity || 1) }
-                    : i
-            ));
-        } else {
-            setItems([...items, {
+            return [...prev, {
                 ...item,
                 id: `${item.itemId}-${Date.now()}`,
                 quantity: item.quantity || 1,
-            }]);
-        }
+            }];
+        });
     };
 
     const removeFromCart = (id: string) => {
-        setItems(items.filter(item => item.id !== id));
+        setItems(prev => prev.filter(item => item.id !== id));
     };
 
     const removeByItemId = (itemId: string) => {
-        setItems(items.filter(item => item.itemId !== itemId));
+        setItems(prev => prev.filter(item => item.itemId !== itemId));
     };
 
     const updateQuantity = (id: string, quantity: number) => {
-        if (quantity <= 0) {
-            removeFromCart(id);
-        } else {
-            setItems(items.map(item =>
+        setItems(prev => {
+            if (quantity <= 0) {
+                return prev.filter(item => item.id !== id);
+            }
+            return prev.map(item =>
                 item.id === id ? { ...item, quantity } : item
-            ));
-        }
+            );
+        });
     };
 
     const clearCart = () => {
@@ -162,6 +233,10 @@ export const CartProvider: React.FC<{ children: React.ReactNode }> = ({ children
         return items.some(item => item.itemId === itemId);
     };
 
+    const getItem = (itemId: string) => {
+        return items.find(item => item.itemId === itemId);
+    };
+
     return (
         <CartContext.Provider value={{
             items,
@@ -173,6 +248,7 @@ export const CartProvider: React.FC<{ children: React.ReactNode }> = ({ children
             getItemCount,
             getTotal,
             isInCart,
+            getItem,
         }}>
             {children}
         </CartContext.Provider>

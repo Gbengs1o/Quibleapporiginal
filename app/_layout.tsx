@@ -8,6 +8,12 @@ import { OrderProvider } from '@/contexts/order';
 import { WalletProvider } from '@/contexts/wallet';
 import { ThemeProvider } from '@/hooks/use-theme';
 import { usePushNotifications } from '@/hooks/usePushNotifications';
+import AsyncStorage from '@/utils/AsyncStorage';
+import {
+  extractReferralCodeFromAnyUrl,
+  normalizeReferralCode,
+  PENDING_REFERRAL_CODE_STORAGE_KEY,
+} from '@/utils/referral';
 import { supabase } from '@/utils/supabase';
 import { Montserrat_400Regular, Montserrat_500Medium, Montserrat_600SemiBold, Montserrat_700Bold } from '@expo-google-fonts/montserrat';
 import { OpenSans_400Regular, OpenSans_600SemiBold, OpenSans_700Bold, useFonts } from '@expo-google-fonts/open-sans';
@@ -26,6 +32,41 @@ function InitialLayout() {
   const { isReady, session } = useAuth();
   const router = useRouter();
   const { expoPushToken } = usePushNotifications();
+
+  const applyReferralCodeForCurrentUser = async (referralCode: string) => {
+    const normalized = normalizeReferralCode(referralCode);
+    if (!normalized || !session?.user?.id) return;
+
+    try {
+      const { data, error } = await supabase.rpc('apply_referral_code', {
+        p_referral_code: normalized,
+      });
+
+      if (error) {
+        console.error('Error applying referral code from deep link:', error);
+        return;
+      }
+
+      const payload = (data || {}) as { success?: boolean; message?: string };
+      if (payload.success) {
+        await AsyncStorage.removeItem(PENDING_REFERRAL_CODE_STORAGE_KEY);
+        return;
+      }
+
+      const message = String(payload.message || '').toLowerCase();
+      const shouldClearPending =
+        message.includes('already linked') ||
+        message.includes('invalid referral code') ||
+        message.includes('cannot use your own referral code') ||
+        message.includes('referral code is required');
+
+      if (shouldClearPending) {
+        await AsyncStorage.removeItem(PENDING_REFERRAL_CODE_STORAGE_KEY);
+      }
+    } catch (error) {
+      console.error('Unexpected error applying deep-link referral code:', error);
+    }
+  };
 
   // Sync Push Token
   useEffect(() => {
@@ -61,11 +102,17 @@ function InitialLayout() {
       // Handle deep linking for specific screens
       if (data?.chatId) {
         // Check if it's an order chat or regular chat
-        if (data.type === 'rider_customer' || data.type === 'rider_restaurant' || data.type === 'general') {
+        if (data.type === 'rider_customer' || data.type === 'rider_restaurant' || data.type === 'rider_store' || data.type === 'general') {
           router.push(`/order-chat/${data.chatId}`);
         } else {
           router.push(`/chat/${data.chatId}`);
         }
+      } else if (data?.action_link) {
+        // Use action_link if provided in metadata (e.g., /rider/delivery/[id] or /order/[id])
+        router.push(data.action_link as any);
+      } else if (data?.order_id) {
+        // Fallback to customer order detail if only order_id is present
+        router.push(`/order/${data.order_id}`);
       } else {
         router.push('/notifications');
       }
@@ -86,6 +133,16 @@ function InitialLayout() {
   useEffect(() => {
     const handleUrl = async (url: string | null) => {
       if (!url) return;
+
+      const referralCode = extractReferralCodeFromAnyUrl(url);
+      if (referralCode) {
+        await AsyncStorage.setItem(PENDING_REFERRAL_CODE_STORAGE_KEY, referralCode);
+        if (session?.user?.id) {
+          await applyReferralCodeForCurrentUser(referralCode);
+        } else {
+          router.push({ pathname: '/signup', params: { ref: referralCode } } as any);
+        }
+      }
 
       // Check if it's a reset password link (contains access_token & type=recovery not always present but hash parameters are)
       if (url.includes('access_token') && url.includes('refresh_token')) {
@@ -136,7 +193,7 @@ function InitialLayout() {
     return () => {
       subscription.remove();
     };
-  }, [router]);
+  }, [router, session?.user?.id]);
 
   // Handle Auth State Changes (Supabase Internal)
   useEffect(() => {

@@ -1,10 +1,13 @@
 import HomeCategories, { PriceRange, RatingFilter, ServiceCategory, SortOption } from '@/components/HomeCategories';
 import HomeDiscovery from '@/components/HomeDiscovery';
 import HomeHeader from '@/components/HomeHeader';
+import HomeReferralBanner from '@/components/HomeReferralBanner';
 import LogoLoader from '@/components/LogoLoader';
 import NearbyDishes from '@/components/NearbyDishes';
 import NearbyRiders from '@/components/NearbyRiders';
 import NearbyStores from '@/components/NearbyStores';
+import PromoCarousel from '@/components/PromoCarousel';
+import ReferralWelcomePopup from '@/components/ReferralWelcomePopup';
 import SidePanel from '@/components/SidePanel';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
@@ -92,22 +95,26 @@ const HomeScreen = () => {
 
   // --- 1. Static Header Content ---
   const renderCategoriesHeader = () => (
-    <HomeCategories
-      selectedCategory={selectedCategory}
-      onCategoryChange={setSelectedCategory}
-      searchQuery={searchQuery}
-      onSearchChange={setSearchQuery}
-      dishCategoryFilter={dishCategoryFilter}
-      onDishCategoryChange={setDishCategoryFilter}
-      storeCategoryFilter={storeCategoryFilter}
-      onStoreCategoryChange={setStoreCategoryFilter}
-      sortBy={sortBy}
-      onSortChange={setSortBy}
-      priceRange={priceRange}
-      onPriceRangeChange={setPriceRange}
-      ratingFilter={ratingFilter}
-      onRatingFilterChange={setRatingFilter}
-    />
+    <>
+      <PromoCarousel />
+      <HomeReferralBanner />
+      <HomeCategories
+        selectedCategory={selectedCategory}
+        onCategoryChange={setSelectedCategory}
+        searchQuery={searchQuery}
+        onSearchChange={setSearchQuery}
+        dishCategoryFilter={dishCategoryFilter}
+        onDishCategoryChange={setDishCategoryFilter}
+        storeCategoryFilter={storeCategoryFilter}
+        onStoreCategoryChange={setStoreCategoryFilter}
+        sortBy={sortBy}
+        onSortChange={setSortBy}
+        priceRange={priceRange}
+        onPriceRangeChange={setPriceRange}
+        ratingFilter={ratingFilter}
+        onRatingFilterChange={setRatingFilter}
+      />
+    </>
   );
 
   return (
@@ -199,6 +206,7 @@ const HomeScreen = () => {
         </TouchableOpacity>
       )}
 
+      <ReferralWelcomePopup />
       <SidePanel isOpen={isSidePanelOpen} onClose={toggleSidePanel} profile={profile} />
     </ThemedView>
   );

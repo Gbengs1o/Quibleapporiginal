@@ -1,4 +1,3 @@
-import LogoLoader from '@/components/LogoLoader';
 import { ThemedText } from '@/components/themed-text';
 import TunnelAnimation from '@/components/TunnelAnimation';
 import { useTheme } from '@/hooks/use-theme';
@@ -8,14 +7,12 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { LinearGradient } from 'expo-linear-gradient';
 import * as Location from 'expo-location';
 import { useRouter } from 'expo-router';
-import debounce from 'lodash/debounce';
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   Dimensions,
   FlatList,
   Image,
   RefreshControl,
-  ScrollView,
   StyleSheet,
   TextInput,
   TouchableOpacity,
@@ -23,7 +20,6 @@ import {
 } from 'react-native';
 import Animated, {
   Easing,
-  FadeInDown,
   FadeInRight,
   FadeInUp,
   interpolate,
@@ -46,25 +42,53 @@ const NAVY = '#1F2050';
 const NAVY_LIGHT = 'rgba(31, 32, 80, 0.08)';
 
 // ============ MOCK DATA (Fallbacks) ============
-const FEATURED_RESTAURANTS = [
-  { id: '1', name: 'The Spice Kitchen', cuisine: 'Nigerian • African', rating: 4.8, image: 'https://images.unsplash.com/photo-1555396273-367ea4eb4db5?w=400', deliveryTime: '25-35 min' },
-  { id: '2', name: 'Mama\'s Delight', cuisine: 'Local Cuisine', rating: 4.9, image: 'https://images.unsplash.com/photo-1517248135467-4c7edcad34c4?w=400', deliveryTime: '20-30 min' },
-  { id: '3', name: 'Urban Grill House', cuisine: 'BBQ • Steaks', rating: 4.7, image: 'https://images.unsplash.com/photo-1552566626-52f8b828add9?w=400', deliveryTime: '30-40 min' },
-];
-
 const QUICK_CATEGORIES = [
   { id: '1', name: 'Food', icon: 'restaurant', color: ORANGE },
-  { id: '2', name: 'Riders', icon: 'bicycle', color: ORANGE },
-  { id: '3', name: 'Grocery', icon: 'basket', color: ORANGE },
-  { id: '4', name: 'Handyman', icon: 'hammer', color: ORANGE },
+  { id: '2', name: 'Stores', icon: 'basket', color: ORANGE },
+  { id: '3', name: 'Riders', icon: 'bicycle', color: ORANGE },
 ];
 
-const POPULAR_DISHES = [
-  { id: '1', name: 'Jollof Rice Special', restaurant: 'Mama\'s Kitchen', price: '₦2,500', image: 'https://images.unsplash.com/photo-1574484284002-952d92456975?w=300' },
-  { id: '2', name: 'Suya Platter', restaurant: 'Northern Grill', price: '₦3,000', image: 'https://images.unsplash.com/photo-1529006557810-274b9b2fc783?w=300' },
-  { id: '3', name: 'Egusi Soup', restaurant: 'Village Pot', price: '₦1,800', image: 'https://images.unsplash.com/photo-1604329760661-e71dc83f8f26?w=300' },
-  { id: '4', name: 'Pounded Yam', restaurant: 'Authentic Naija', price: '₦2,200', image: 'https://images.unsplash.com/photo-1546069901-ba9599a7e63c?w=300' },
+const RIDER_SERVICE_KEYWORDS = [
+  'ride',
+  'rider',
+  'delivery',
+  'logistics',
+  'dispatch',
+  'package',
+  'bike',
+  'bicycle',
+  'motorcycle',
+  'car',
+  'keke',
+  'tricycle',
+  'van',
+  'truck',
+  'hailing',
+  'service',
+  'services',
+  'uber',
 ];
+
+const pickJoinedRow = <T,>(value: T | T[] | null | undefined): T | null => {
+  if (Array.isArray(value)) return value[0] ?? null;
+  return value ?? null;
+};
+
+const debounce = <T extends (...args: any[]) => void>(fn: T, delayMs: number) => {
+  let timeoutRef: ReturnType<typeof setTimeout> | null = null;
+
+  const debouncedFn = (...args: Parameters<T>) => {
+    if (timeoutRef) clearTimeout(timeoutRef);
+    timeoutRef = setTimeout(() => fn(...args), delayMs);
+  };
+
+  debouncedFn.cancel = () => {
+    if (timeoutRef) clearTimeout(timeoutRef);
+    timeoutRef = null;
+  };
+
+  return debouncedFn as T & { cancel: () => void };
+};
 
 type SearchResult = {
   type: 'restaurant' | 'dish' | 'rider' | 'store' | 'store_item';
@@ -77,6 +101,23 @@ type SearchResult = {
   price?: number;
 };
 
+type SearchTab = 'all' | 'food' | 'store' | 'rider';
+
+const TAB_RESULT_TYPES: Record<SearchTab, SearchResult['type'][]> = {
+  all: ['restaurant', 'dish', 'store', 'store_item', 'rider'],
+  food: ['restaurant', 'dish'],
+  store: ['store', 'store_item'],
+  rider: ['rider'],
+};
+
+const RESULT_RAILS: Array<{ key: SearchResult['type']; title: string }> = [
+  { key: 'restaurant', title: 'Restaurants' },
+  { key: 'dish', title: 'Food Picks' },
+  { key: 'store', title: 'Stores' },
+  { key: 'store_item', title: 'Store Finds' },
+  { key: 'rider', title: 'Riders Near You' },
+];
+
 const STORE_CATEGORIES = ['Grocery', 'Pharmacy', 'Fashion', 'Electronics', 'Beauty', 'Home', 'Supermarket'];
 
 const SEARCH_HISTORY_KEY = 'quible_search_history';
@@ -87,7 +128,7 @@ export default function SearchScreen() {
   const { theme } = useTheme();
   const isDark = theme === 'dark';
   const [searchText, setSearchText] = useState('');
-  const [results, setResults] = useState<SearchResult[]>([]);
+  const [allResults, setAllResults] = useState<SearchResult[]>([]);
   const [loading, setLoading] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [restaurants, setRestaurants] = useState<any[]>([]);
@@ -99,7 +140,7 @@ export default function SearchScreen() {
   const [sortBy, setSortBy] = useState('distance');
   const [priceRange, setPriceRange] = useState('all');
   const [ratingFilter, setRatingFilter] = useState(0);
-  const [activeTab, setActiveTab] = useState<'all' | 'food' | 'store' | 'rider'>('all');
+  const [activeTab, setActiveTab] = useState<SearchTab>('all');
   const [storeCategory, setStoreCategory] = useState<string | null>(null);
   const [foodCategory, setFoodCategory] = useState<string | null>(null);
 
@@ -177,27 +218,51 @@ export default function SearchScreen() {
 
   const fetchFeedData = async () => {
     try {
-      // Fetch Real Restaurants
+      // 1. Fetch Featured Places (Restaurants & Stores)
       const { data: restData } = await supabase
         .from('restaurants')
-        .select('*')
-        .eq('is_active', true)
+        .select('id, name, cuisine_type, restaurant_picture_url, status, current_rating')
+        .eq('status', 'active')
         .limit(5);
 
-      if (restData && restData.length > 0) {
-        setRestaurants(restData);
-      }
+      const { data: storeData } = await supabase
+        .from('stores')
+        .select('id, name, category, logo_url, status, current_rating')
+        .eq('status', 'active')
+        .limit(5);
 
-      // Fetch Real Menu Items
+      const combinedFeatured = [
+        ...(restData || []).map(r => ({ ...r, type: 'restaurant', image: r.restaurant_picture_url })),
+        ...(storeData || []).map(s => ({ ...s, type: 'store', image: s.logo_url, cuisine_type: s.category || 'Store' }))
+      ].sort(() => Math.random() - 0.5);
+
+      setRestaurants(combinedFeatured);
+
+      // 2. Fetch Popular Items (Menu Items & Store Items)
       const { data: menuData } = await supabase
         .from('menu_items')
-        .select('*, restaurants(name)')
+        .select('id, name, price, image_url, restaurants(name)')
         .eq('is_active', true)
         .limit(6);
 
-      if (menuData && menuData.length > 0) {
-        setMenuItems(menuData);
-      }
+      const { data: storeItemsData } = await supabase
+        .from('store_items')
+        .select('id, name, price, image_url, stores(name)')
+        .eq('is_active', true)
+        .limit(6);
+
+      const combinedItems = [
+        ...(menuData || []).map((m: any) => {
+          const restaurant = pickJoinedRow<{ name?: string }>(m.restaurants);
+          return { ...m, type: 'dish', restaurant: restaurant?.name, image_url: m.image_url };
+        }),
+        ...(storeItemsData || []).map((s: any) => {
+          const store = pickJoinedRow<{ name?: string }>(s.stores);
+          return { ...s, type: 'store_item', restaurant: store?.name, image_url: s.image_url };
+        })
+      ].sort(() => Math.random() - 0.5);
+
+      setMenuItems(combinedItems);
     } catch (e) {
       console.error('Feed fetch error:', e);
     }
@@ -218,28 +283,42 @@ export default function SearchScreen() {
     accent: ORANGE,
   };
 
+  const displayResults = useMemo(() => {
+    const allowedTypes = TAB_RESULT_TYPES[activeTab];
+    return allResults.filter((item) => allowedTypes.includes(item.type));
+  }, [activeTab, allResults]);
+
+  const fallbackResults = useMemo(() => {
+    if (activeTab === 'all' || displayResults.length > 0) return [];
+    return allResults.slice(0, 12);
+  }, [activeTab, allResults, displayResults.length]);
+
   const handleSearchChange = (text: string) => {
+    if (searchText.length === 0 && text.length > 0) {
+      setActiveTab('all');
+    }
+
     setSearchText(text);
     if (text.length > 0) {
       searchFocus.value = withTiming(1);
-      performSearch(text, sortBy, priceRange, ratingFilter, activeTab, storeCategory, foodCategory);
+      performSearch(text, sortBy, priceRange, ratingFilter, 'all', storeCategory, foodCategory);
     } else {
       searchFocus.value = withTiming(0);
-      setResults([]);
+      setAllResults([]);
     }
   };
 
   // Re-run search when filters change
   useEffect(() => {
     if (searchText.length > 1) {
-      performSearch(searchText, sortBy, priceRange, ratingFilter, activeTab, storeCategory, foodCategory);
+      performSearch(searchText, sortBy, priceRange, ratingFilter, 'all', storeCategory, foodCategory);
     }
-  }, [sortBy, priceRange, ratingFilter, activeTab, searchText, storeCategory, foodCategory]);
+  }, [sortBy, priceRange, ratingFilter, searchText, storeCategory, foodCategory]);
 
   const performSearch = useCallback(
-    debounce(async (query: string, sBy: string, pRange: string, rFilter: number, aTab: string, sCat: string | null, fCat: string | null) => {
+    debounce(async (query: string, sBy: string, pRange: string, _rFilter: number, aTab: string, sCat: string | null, fCat: string | null) => {
       if (!query || query.trim().length < 2) {
-        setResults([]);
+        setAllResults([]);
         setLoading(false);
         return;
       }
@@ -247,14 +326,19 @@ export default function SearchScreen() {
       setLoading(true);
       try {
         const searchResults: SearchResult[] = [];
+        const normalizedQuery = query.trim().toLowerCase();
+        const queryTokens = normalizedQuery.split(/\s+/).filter(Boolean);
+        const isServiceSearch = queryTokens.some((token) =>
+          RIDER_SERVICE_KEYWORDS.some((keyword) => keyword.includes(token) || token.includes(keyword))
+        );
 
         // 1. Search Restaurants
         if (aTab === 'all' || aTab === 'food') {
           let restQuery = supabase
             .from('restaurants')
-            .select('id, name, cuisine_type, image_url, latitude, longitude')
+            .select('id, name, cuisine_type, restaurant_picture_url, latitude, longitude, status')
             .or(`name.ilike.%${query}%,cuisine_type.ilike.%${query}%`)
-            .eq('is_active', true);
+            .eq('status', 'active');
 
           const { data: rests } = await restQuery.limit(10);
 
@@ -264,7 +348,7 @@ export default function SearchScreen() {
               id: r.id,
               title: r.name,
               subtitle: r.cuisine_type || 'Restaurant',
-              image: r.image_url || 'https://images.unsplash.com/photo-1517248135467-4c7edcad34c4?w=400', // Default image
+              image: r.restaurant_picture_url || 'https://images.unsplash.com/photo-1517248135467-4c7edcad34c4?w=400', // Default image
               meta: userLocation ? `${calculateDistance(userLocation.latitude, userLocation.longitude, r.latitude, r.longitude).toFixed(1)}km` : 'Place',
               distance: userLocation ? calculateDistance(userLocation.latitude, userLocation.longitude, r.latitude, r.longitude) : 999,
               price: 0
@@ -295,10 +379,17 @@ export default function SearchScreen() {
               type: 'dish' as const,
               id: m.id,
               title: m.name,
-              subtitle: m.restaurants?.name || 'Dish',
+              subtitle: pickJoinedRow<{ name?: string }>(m.restaurants)?.name || 'Dish',
               image: m.image_url || 'https://images.unsplash.com/photo-1546069901-ba9599a7e63c?w=300', // Default image
-              meta: `₦${m.price.toLocaleString()}`,
-              distance: userLocation && m.restaurants ? calculateDistance(userLocation.latitude, userLocation.longitude, m.restaurants.latitude, m.restaurants.longitude) : 999,
+              meta: `NGN ${Number(m.price || 0).toLocaleString()}`,
+              distance: userLocation && pickJoinedRow<{ latitude?: number; longitude?: number }>(m.restaurants)
+                ? calculateDistance(
+                  userLocation.latitude,
+                  userLocation.longitude,
+                  pickJoinedRow<{ latitude?: number }>(m.restaurants)?.latitude || 0,
+                  pickJoinedRow<{ longitude?: number }>(m.restaurants)?.longitude || 0
+                )
+                : 999,
               price: m.price
             })));
           }
@@ -308,9 +399,10 @@ export default function SearchScreen() {
         if (aTab === 'all' || aTab === 'store') {
           const { data: storesData } = await supabase
             .from('stores')
-            .select('id, name, logo_url, address, latitude, longitude')
+            .select('id, name, logo_url, address, latitude, longitude, status')
             .ilike('name', `%${query}%`)
-            .limit(5);
+            .eq('status', 'active')
+            .limit(10);
 
           if (storesData) {
             searchResults.push(...storesData.map((s: any) => ({
@@ -349,23 +441,90 @@ export default function SearchScreen() {
               type: 'store_item' as const,
               id: p.id,
               title: p.name,
-              subtitle: p.stores?.name || 'Product',
+              subtitle: pickJoinedRow<{ name?: string }>(p.stores)?.name || 'Product',
               image: p.image_url || 'https://images.unsplash.com/photo-1546069901-ba9599a7e63c?w=300', // Default image
-              meta: `₦${p.price.toLocaleString()}`,
-              distance: userLocation && p.stores ? calculateDistance(userLocation.latitude, userLocation.longitude, p.stores.latitude, p.stores.longitude) : 999,
+              meta: `NGN ${Number(p.price || 0).toLocaleString()}`,
+              distance: userLocation && pickJoinedRow<{ latitude?: number; longitude?: number }>(p.stores)
+                ? calculateDistance(
+                  userLocation.latitude,
+                  userLocation.longitude,
+                  pickJoinedRow<{ latitude?: number }>(p.stores)?.latitude || 0,
+                  pickJoinedRow<{ longitude?: number }>(p.stores)?.longitude || 0
+                )
+                : 999,
               price: p.price
             })));
           }
         }
 
-        // 5. Final Sorting
+        // 5. Search Riders / Services
+        if (aTab === 'all' || aTab === 'rider') {
+          const { data: ridersData } = await supabase
+            .from('riders')
+            .select(`
+              id,
+              user_id,
+              vehicle_type,
+              average_rating,
+              is_online,
+              status,
+              current_latitude,
+              current_longitude,
+              profile:profiles(first_name, last_name, profile_picture_url)
+            `)
+            .eq('status', 'active')
+            .eq('is_online', true)
+            .limit(40);
+
+          if (ridersData) {
+            const filteredRiders = ridersData
+              .filter((r: any) => {
+                const firstName = (r.profile?.first_name || '').toLowerCase();
+                const lastName = (r.profile?.last_name || '').toLowerCase();
+                const vehicleType = (r.vehicle_type || '').toLowerCase();
+                const haystack = `${firstName} ${lastName} ${vehicleType}`;
+                const textMatch = queryTokens.every((token) => haystack.includes(token));
+                return textMatch || isServiceSearch;
+              })
+              .slice(0, 15);
+
+            searchResults.push(...filteredRiders.map((r: any) => {
+              const fullName = `${r.profile?.first_name || ''} ${r.profile?.last_name || ''}`.trim();
+              const vehicle = (r.vehicle_type || 'rider').toString();
+              const vehicleLabel = `${vehicle.charAt(0).toUpperCase()}${vehicle.slice(1)}`;
+              const riderDistance = userLocation
+                ? calculateDistance(
+                  userLocation.latitude,
+                  userLocation.longitude,
+                  r.current_latitude || 0,
+                  r.current_longitude || 0
+                )
+                : 999;
+
+              return {
+                type: 'rider' as const,
+                id: r.user_id || r.id,
+                title: fullName || `${vehicleLabel} Rider`,
+                subtitle: `${vehicleLabel} service`,
+                image: r.profile?.profile_picture_url || 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=300',
+                meta: userLocation
+                  ? `${riderDistance.toFixed(1)}km`
+                  : (r.average_rating ? `Rating ${Number(r.average_rating).toFixed(1)}` : 'Rider'),
+                distance: riderDistance,
+                price: 0
+              };
+            }));
+          }
+        }
+
+        // 6. Final Sorting
         searchResults.sort((a: any, b: any) => {
           if (sBy === 'price_low') return (a.price || 0) - (b.price || 0);
           if (sBy === 'price_high') return (b.price || 0) - (a.price || 0);
           return (a.distance || 0) - (b.distance || 0);
         });
 
-        setResults(searchResults);
+        setAllResults(searchResults);
       } catch (error) {
         console.error('Search error:', error);
       } finally {
@@ -385,6 +544,8 @@ export default function SearchScreen() {
       router.push(`/store-profile/${item.id}`);
     } else if (item.type === 'store_item') {
       router.push(`/store-item/${item.id}`);
+    } else if (item.type === 'rider') {
+      router.push(`/rider-profile/${item.id}`);
     }
   };
 
@@ -400,7 +561,7 @@ export default function SearchScreen() {
   // ============ RENDER SECTIONS ============
 
   const renderHeader = () => (
-    <View style={[styles.header, { paddingTop: insets.top + 100 }]}>
+    <View style={[styles.header, { paddingTop: insets.top + 20 }]}>
       {/* Tunnel Animation Background */}
       <View style={styles.animationContainer}>
         <TunnelAnimation theme={isDark ? 'dark' : 'light'} />
@@ -418,7 +579,7 @@ export default function SearchScreen() {
           <Ionicons name="search" size={20} color={ORANGE} />
           <TextInput
             style={[styles.searchInput, { color: colors.text }]}
-            placeholder="Search restaurants, dishes, riders..."
+            placeholder="Search restaurants, stores, items, riders, services..."
             placeholderTextColor={colors.textSec}
             value={searchText}
             onChangeText={handleSearchChange}
@@ -435,14 +596,21 @@ export default function SearchScreen() {
 
   const renderQuickCategories = () => (
     <Animated.View entering={FadeInUp.delay(100).springify()} style={styles.section}>
-      <ThemedText style={[styles.sectionTitle, { color: colors.text }]}>Quick Access</ThemedText>
+      <ThemedText style={[styles.sectionTitle, styles.sectionTitleStandalone, { color: colors.text }]}>Quick Access</ThemedText>
       <View style={styles.categoryRow}>
         {QUICK_CATEGORIES.map((cat) => (
           <TouchableOpacity
             key={cat.id}
             style={[styles.categoryCard, { backgroundColor: colors.card, borderColor: colors.border }]}
             activeOpacity={0.7}
-            onPress={() => handleSearchChange(cat.name === 'Food' ? 'Restaurant' : cat.name)}
+            onPress={() => {
+              const query = cat.name === 'Food' ? 'Restaurant' : cat.name;
+              const tab: SearchTab = cat.name === 'Food' ? 'food' : (cat.name === 'Stores' ? 'store' : 'rider');
+              setActiveTab(tab);
+              setSearchText(query);
+              searchFocus.value = withTiming(1);
+              performSearch(query, sortBy, priceRange, ratingFilter, 'all', storeCategory, foodCategory);
+            }}
           >
             <View style={[styles.categoryIcon, { backgroundColor: ORANGE_LIGHT }]}>
               <Ionicons name={cat.icon as any} size={22} color={ORANGE} />
@@ -454,7 +622,7 @@ export default function SearchScreen() {
     </Animated.View>
   );
 
-  const renderFeaturedRestaurants = () => (
+  const renderFeaturedPlaces = () => (
     <Animated.View entering={FadeInUp.delay(200).springify()} style={styles.section}>
       <View style={styles.sectionHeader}>
         <ThemedText style={[styles.sectionTitle, { color: colors.text }]}>Featured Places</ThemedText>
@@ -465,20 +633,20 @@ export default function SearchScreen() {
       </View>
 
       <FlatList
-        data={restaurants.length > 0 ? restaurants : FEATURED_RESTAURANTS}
+        data={restaurants}
         horizontal
         showsHorizontalScrollIndicator={false}
         contentContainerStyle={{ paddingLeft: 20 }}
-        keyExtractor={item => item.id}
+        keyExtractor={item => `${item.type}-${item.id}`}
         renderItem={({ item, index }) => (
           <Animated.View entering={FadeInRight.delay(index * 100).springify()}>
             <TouchableOpacity
               style={[styles.featuredCard, { borderColor: colors.border }]}
               activeOpacity={0.8}
-              onPress={() => router.push(`/restaurant-profile/${item.id}`)}
+              onPress={() => item.type === 'restaurant' ? router.push(`/restaurant-profile/${item.id}`) : router.push(`/store-profile/${item.id}`)}
             >
               <Image
-                source={{ uri: item.image_url || item.image || 'https://images.unsplash.com/photo-1517248135467-4c7edcad34c4?w=400' }}
+                source={{ uri: item.image || 'https://images.unsplash.com/photo-1517248135467-4c7edcad34c4?w=400' }}
                 style={styles.featuredImage}
               />
               <LinearGradient
@@ -487,13 +655,13 @@ export default function SearchScreen() {
               />
               <View style={styles.featuredContent}>
                 <ThemedText style={styles.featuredName}>{item.name}</ThemedText>
-                <ThemedText style={styles.featuredCuisine}>{item.cuisine_type || item.cuisine || 'Restaurant'}</ThemedText>
+                <ThemedText style={styles.featuredCuisine}>{item.cuisine_type || 'Discovery'}</ThemedText>
                 <View style={styles.featuredMeta}>
                   <View style={[styles.ratingBadge, { backgroundColor: ORANGE }]}>
                     <Ionicons name="star" size={12} color="#FFF" />
-                    <ThemedText style={styles.ratingText}>{item.rating || '4.5'}</ThemedText>
+                    <ThemedText style={styles.ratingText}>{item.current_rating || '4.5'}</ThemedText>
                   </View>
-                  <ThemedText style={styles.deliveryTime}>{item.deliveryTime || '25-35 min'}</ThemedText>
+                  <ThemedText style={styles.deliveryTime}>Featured</ThemedText>
                 </View>
               </View>
             </TouchableOpacity>
@@ -503,45 +671,54 @@ export default function SearchScreen() {
     </Animated.View>
   );
 
-  const renderPopularDishes = () => (
-    <Animated.View entering={FadeInUp.delay(300).springify()} style={styles.section}>
-      <ThemedText style={[styles.sectionTitle, { color: colors.text }]}>Popular Right Now</ThemedText>
-      <View style={styles.dishGrid}>
-        {(menuItems.length > 0 ? menuItems : POPULAR_DISHES).slice(0, 4).map((dish, index) => (
-          <Animated.View
-            key={dish.id}
-            entering={FadeInUp.delay(400 + index * 80).springify()}
-            style={[styles.dishCard, { backgroundColor: colors.card, borderColor: colors.border }]}
-          >
-            <TouchableOpacity
-              style={{ flex: 1 }}
-              activeOpacity={0.8}
-              onPress={() => router.push(`/dish/${dish.id}`)}
-            >
-              <Image
-                source={{ uri: dish.image_url || dish.image || 'https://images.unsplash.com/photo-1546069901-ba9599a7e63c?w=300' }}
-                style={styles.dishImage}
-              />
-              <View style={styles.dishInfo}>
-                <ThemedText style={[styles.dishName, { color: colors.text }]} numberOfLines={1}>{dish.name}</ThemedText>
-                <ThemedText style={[styles.dishRestaurant, { color: colors.textSec }]} numberOfLines={1}>
-                  {dish.restaurants?.name || dish.restaurant}
-                </ThemedText>
-                <View style={styles.dishPriceRow}>
-                  <ThemedText style={[styles.dishPrice, { color: ORANGE }]}>
-                    {dish.price ? `₦${dish.price}` : dish.price}
-                  </ThemedText>
-                  <TouchableOpacity style={[styles.addButton, { backgroundColor: ORANGE }]}>
-                    <Ionicons name="add" size={16} color="#FFF" />
-                  </TouchableOpacity>
+  const renderPopularDishes = () => {
+    if (menuItems.length === 0) return null;
+
+    return (
+      <Animated.View entering={FadeInUp.delay(400).springify()} style={styles.section}>
+        <View style={styles.sectionHeader}>
+          <ThemedText style={[styles.sectionTitle, { color: colors.text }]}>Popular Right Now</ThemedText>
+          <ThemedText style={[styles.railHintText, { color: colors.textSec }]}>Swipe to explore</ThemedText>
+        </View>
+
+        <FlatList
+          data={menuItems}
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          keyExtractor={(dish) => `${dish.type}-${dish.id}`}
+          contentContainerStyle={styles.popularRailContent}
+          renderItem={({ item: dish, index }) => (
+            <Animated.View entering={FadeInRight.delay(360 + index * 80).springify()}>
+              <TouchableOpacity
+                style={[styles.popularCard, { backgroundColor: colors.card, borderColor: colors.border }]}
+                activeOpacity={0.82}
+                onPress={() => dish.type === 'dish' ? router.push(`/dish/${dish.id}`) : router.push(`/store-item/${dish.id}`)}
+              >
+                <Image
+                  source={{ uri: dish.image_url || 'https://images.unsplash.com/photo-1546069901-ba9599a7e63c?w=300' }}
+                  style={styles.popularCardImage}
+                />
+                <LinearGradient
+                  colors={['transparent', 'rgba(10, 10, 15, 0.92)']}
+                  style={styles.popularCardGradient}
+                />
+                <View style={styles.popularCardInfo}>
+                  <ThemedText style={styles.popularCardTitle} numberOfLines={1}>{dish.name}</ThemedText>
+                  <ThemedText style={styles.popularCardSub} numberOfLines={1}>{dish.restaurant}</ThemedText>
+                  <View style={styles.popularCardBottom}>
+                    <ThemedText style={styles.popularCardPrice}>NGN {Number(dish.price || 0).toLocaleString()}</ThemedText>
+                    <View style={styles.popularCardCTA}>
+                      <Ionicons name="arrow-forward" size={14} color="#FFF" />
+                    </View>
+                  </View>
                 </View>
-              </View>
-            </TouchableOpacity>
-          </Animated.View>
-        ))}
-      </View>
-    </Animated.View>
-  );
+              </TouchableOpacity>
+            </Animated.View>
+          )}
+        />
+      </Animated.View>
+    );
+  };
 
   const renderRecentSearches = () => {
     if (recentSearches.length === 0) return null;
@@ -570,193 +747,172 @@ export default function SearchScreen() {
     );
   };
 
-  const renderSearchResultItem = ({ item, index }: { item: SearchResult, index: number }) => (
-    <Animated.View
-      key={`${item.type}-${item.id}`}
-      entering={FadeInUp.delay(index * 60).springify()}
-    >
-      <TouchableOpacity
-        style={[styles.resultCard, { backgroundColor: colors.card, borderColor: colors.border }]}
-        onPress={() => handleResultPress(item)}
-      >
-        <View style={[styles.resultIcon, { backgroundColor: ORANGE_LIGHT }]}>
-          <Ionicons
-            name={
-              item.type === 'restaurant' ? 'restaurant' :
-                item.type === 'rider' ? 'bicycle' :
-                  item.type === 'store' ? 'storefront' :
-                    item.type === 'store_item' ? 'basket' :
-                      'fast-food'
-            }
-            size={20}
-            color={ORANGE}
-          />
-        </View>
-        <View style={styles.resultInfo}>
-          <ThemedText style={[styles.resultTitle, { color: colors.text }]}>{item.title}</ThemedText>
-          <ThemedText style={[styles.resultSub, { color: colors.textSec }]}>{item.subtitle}</ThemedText>
-        </View>
-        <View style={[styles.resultMeta, { backgroundColor: ORANGE_LIGHT }]}>
-          <ThemedText style={[styles.resultMetaText, { color: ORANGE }]}>{item.meta}</ThemedText>
-        </View>
-      </TouchableOpacity>
-    </Animated.View>
-  );
+  const getResultIcon = (type: SearchResult['type']) => {
+    if (type === 'restaurant') return 'restaurant';
+    if (type === 'dish') return 'fast-food';
+    if (type === 'store') return 'storefront';
+    if (type === 'store_item') return 'basket';
+    return 'bicycle';
+  };
 
-  const renderSearchResults = () => (
-    <Animated.View entering={FadeInDown.springify()} style={styles.resultsContainer}>
-      {loading && (
-        <View style={styles.loadingContainer}>
-          <LogoLoader size={80} />
-        </View>
-      )}
+  const getResultLabel = (type: SearchResult['type']) => {
+    if (type === 'restaurant') return 'Restaurant';
+    if (type === 'dish') return 'Food';
+    if (type === 'store') return 'Store';
+    if (type === 'store_item') return 'Product';
+    return 'Rider';
+  };
 
-      {!loading && results.length === 0 && searchText.length > 2 && (
+  const renderSearchResultRails = () => {
+    const sourceResults = displayResults.length > 0 ? displayResults : fallbackResults;
+
+    if (sourceResults.length === 0) {
+      return (
         <View style={styles.emptyState}>
-          <Ionicons name="search-outline" size={48} color={ORANGE_MEDIUM} />
-          <ThemedText style={[styles.emptyText, { color: colors.textSec }]}>
-            No results for "{searchText}"
-          </ThemedText>
+          <Ionicons name="search-outline" size={60} color={colors.textSec} />
+          <ThemedText style={[styles.emptyText, { color: colors.textSec }]}>No results found for "{searchText}"</ThemedText>
         </View>
-      )}
+      );
+    }
 
-      {results.length > 0 ? (
-        <FlatList
-          data={results}
-          keyExtractor={(item, index) => `${item.type}-${item.id}-${index}`}
-          renderItem={renderSearchResultItem}
-          contentContainerStyle={styles.resultsList}
-          ListHeaderComponent={
-            <View style={styles.filterSection}>
-              <ScrollView
+    return (
+      <View style={styles.searchRailsWrap}>
+        {displayResults.length === 0 && activeTab !== 'all' && allResults.length > 0 && (
+          <View style={[styles.tabFallbackCard, { borderColor: colors.border, backgroundColor: colors.card }]}>
+            <View>
+              <ThemedText style={[styles.tabFallbackTitle, { color: colors.text }]}>No {activeTab} matches for "{searchText}"</ThemedText>
+              <ThemedText style={[styles.tabFallbackSub, { color: colors.textSec }]}>Showing discovery from all categories</ThemedText>
+            </View>
+            <TouchableOpacity style={styles.tabFallbackAction} onPress={() => setActiveTab('all')}>
+              <ThemedText style={styles.tabFallbackActionText}>View all</ThemedText>
+            </TouchableOpacity>
+          </View>
+        )}
+
+        {RESULT_RAILS.map((rail, railIndex) => {
+          const railResults = sourceResults.filter((item) => item.type === rail.key);
+          if (railResults.length === 0) return null;
+
+          return (
+            <Animated.View key={rail.key} entering={FadeInUp.delay(railIndex * 90).springify()} style={styles.section}>
+              <View style={styles.sectionHeader}>
+                <ThemedText style={[styles.sectionTitle, { color: colors.text }]}>{rail.title}</ThemedText>
+                <ThemedText style={[styles.railHintText, { color: colors.textSec }]}>{railResults.length} found</ThemedText>
+              </View>
+              <FlatList
+                data={railResults}
                 horizontal
                 showsHorizontalScrollIndicator={false}
-                contentContainerStyle={styles.filterScroll}
-              >
-                {/* Category Tabs */}
-                {['all', 'food', 'store', 'rider'].map((tab) => (
-                  <TouchableOpacity
-                    key={tab}
-                    style={[
-                      styles.filterTab,
-                      activeTab === tab && styles.filterTabActive,
-                      { backgroundColor: activeTab === tab ? ORANGE : colors.card, borderColor: activeTab === tab ? ORANGE : colors.border }
-                    ]}
-                    onPress={() => setActiveTab(tab as any)}
-                  >
-                    <ThemedText style={[
-                      styles.filterTabText,
-                      activeTab === tab && styles.filterTabTextActive,
-                      { color: activeTab === tab ? '#FFF' : colors.textSec }
-                    ]}>
-                      {tab.charAt(0).toUpperCase() + tab.slice(1)}
-                    </ThemedText>
-                  </TouchableOpacity>
-                ))}
+                keyExtractor={(item) => `${item.type}-${item.id}`}
+                contentContainerStyle={styles.searchRailContent}
+                renderItem={({ item, index }) => (
+                  <Animated.View entering={FadeInRight.delay(index * 70).springify()}>
+                    <TouchableOpacity
+                      style={[styles.searchPosterCard, { borderColor: colors.border }]}
+                      activeOpacity={0.86}
+                      onPress={() => handleResultPress(item)}
+                    >
+                      <Image
+                        source={{ uri: item.image || 'https://images.unsplash.com/photo-1517248135467-4c7edcad34c4?w=400' }}
+                        style={styles.searchPosterImage}
+                      />
+                      <LinearGradient
+                        colors={['transparent', 'rgba(10, 10, 15, 0.96)']}
+                        style={styles.searchPosterGradient}
+                      />
+                      <View style={styles.searchPosterContent}>
+                        <View style={styles.searchPosterTypeRow}>
+                          <View style={styles.searchPosterTypePill}>
+                            <Ionicons name={getResultIcon(item.type)} size={12} color="#FFF" />
+                            <ThemedText style={styles.searchPosterTypeText}>{getResultLabel(item.type)}</ThemedText>
+                          </View>
+                        </View>
+                        <ThemedText style={styles.searchPosterTitle} numberOfLines={1}>{item.title}</ThemedText>
+                        <ThemedText style={styles.searchPosterSubtitle} numberOfLines={1}>{item.subtitle}</ThemedText>
+                        <View style={styles.searchPosterMetaPill}>
+                          <ThemedText style={styles.searchPosterMetaText}>{item.meta}</ThemedText>
+                        </View>
+                      </View>
+                    </TouchableOpacity>
+                  </Animated.View>
+                )}
+              />
+            </Animated.View>
+          );
+        })}
+      </View>
+    );
+  };
 
-                <View style={[styles.divider, { backgroundColor: colors.border }]} />
-
-                {/* Sort Button */}
-                <TouchableOpacity
-                  style={[styles.filterPill, sortBy !== 'distance' && styles.filterPillActive, { borderColor: ORANGE, backgroundColor: sortBy !== 'distance' ? ORANGE : colors.card }]}
-                  onPress={() => setSortBy(sortBy === 'distance' ? 'price_low' : sortBy === 'price_low' ? 'price_high' : 'distance')}
-                >
-                  <Ionicons name="swap-vertical" size={14} color={sortBy !== 'distance' ? '#fff' : ORANGE} />
-                  <ThemedText style={[styles.filterPillText, sortBy !== 'distance' && styles.filterPillTextActive, { color: sortBy !== 'distance' ? '#FFF' : ORANGE }]}>
-                    {sortBy === 'distance' ? 'Nearest' : sortBy === 'price_low' ? 'Price ↑' : 'Price ↓'}
-                  </ThemedText>
-                </TouchableOpacity>
-
-                <View style={[styles.divider, { backgroundColor: colors.border }]} />
-
-                {/* Price Filter */}
-                {['budget', 'mid', 'premium'].map((p) => (
-                  <TouchableOpacity
-                    key={p}
-                    style={[styles.filterPill, priceRange === p && styles.filterPillActive, { borderColor: ORANGE, backgroundColor: priceRange === p ? ORANGE : colors.card }]}
-                    onPress={() => setPriceRange(priceRange === p ? 'all' : p)}
-                  >
-                    <ThemedText style={[styles.filterPillText, priceRange === p && styles.filterPillTextActive, { color: priceRange === p ? '#FFF' : ORANGE }]}>
-                      {p.charAt(0).toUpperCase() + p.slice(1)}
-                    </ThemedText>
-                  </TouchableOpacity>
-                ))}
-
-                <View style={[styles.divider, { backgroundColor: colors.border }]} />
-
-                {/* Category Specific Filters */}
-                {activeTab === 'store' && STORE_CATEGORIES.map((c) => (
-                  <TouchableOpacity
-                    key={c}
-                    style={[styles.filterPill, storeCategory === c && styles.filterPillActive, { borderColor: ORANGE, backgroundColor: storeCategory === c ? ORANGE : colors.card }]}
-                    onPress={() => setStoreCategory(storeCategory === c ? null : c)}
-                  >
-                    <ThemedText style={[styles.filterPillText, storeCategory === c && styles.filterPillTextActive, { color: storeCategory === c ? '#FFF' : ORANGE }]}>
-                      {c}
-                    </ThemedText>
-                  </TouchableOpacity>
-                ))}
-
-                {activeTab === 'food' && ['African dishes', 'Special dishes', 'Others'].map((c) => (
-                  <TouchableOpacity
-                    key={c}
-                    style={[styles.filterPill, foodCategory === c && styles.filterPillActive, { borderColor: ORANGE, backgroundColor: foodCategory === c ? ORANGE : colors.card }]}
-                    onPress={() => setFoodCategory(foodCategory === c ? null : c)}
-                  >
-                    <ThemedText style={[styles.filterPillText, foodCategory === c && styles.filterPillTextActive, { color: foodCategory === c ? '#FFF' : ORANGE }]}>
-                      {c}
-                    </ThemedText>
-                  </TouchableOpacity>
-                ))}
-              </ScrollView>
-            </View>
-          }
-        />
-      ) : searchText.length > 0 && !loading ? (
-        <View style={styles.emptyContainer}>
-          <ThemedText style={[styles.emptyText, { color: colors.textSec }]}>
-            No results found for "{searchText}"
-          </ThemedText>
-        </View>
-      ) : (
-        <ScrollView
-          showsVerticalScrollIndicator={false}
-          contentContainerStyle={styles.scrollContent}
-        >
-          {renderFeaturedRestaurants()}
-          {renderPopularDishes()}
-          {renderSearchHistory()}
-        </ScrollView>
-      )}
-    </Animated.View>
-  );
+  useEffect(() => {
+    return () => {
+      performSearch.cancel();
+    };
+  }, [performSearch]);
 
   return (
     <View style={[styles.container, { backgroundColor: colors.bg }]}>
-      {renderHeader()}
+      <FlatList
+        data={[]}
+        keyExtractor={(_, index) => `search-content-${index}`}
+        renderItem={() => null}
+        ListHeaderComponent={() => (
+          <View>
+            {renderHeader()}
 
-      <ScrollView
-        showsVerticalScrollIndicator={false}
-        contentContainerStyle={{ paddingBottom: 120 }}
+            {searchText.length === 0 ? (
+              <View style={styles.discoveryContent}>
+                {renderQuickCategories()}
+                {renderFeaturedPlaces()}
+                {renderPopularDishes()}
+                {renderRecentSearches()}
+              </View>
+            ) : (
+              <View style={styles.searchContent}>
+                <View style={styles.filterSection}>
+                  <FlatList
+                    horizontal
+                    showsHorizontalScrollIndicator={false}
+                    data={[
+                      { id: 'all', label: 'All', icon: 'apps' },
+                      { id: 'food', label: 'Food', icon: 'restaurant' },
+                      { id: 'store', label: 'Stores', icon: 'storefront' },
+                      { id: 'rider', label: 'Riders', icon: 'bicycle' },
+                    ]}
+                    keyExtractor={item => item.id}
+                    contentContainerStyle={styles.filterScroll}
+                    renderItem={({ item }) => (
+                      <TouchableOpacity
+                        style={[styles.filterTab, { borderColor: colors.border }, activeTab === item.id && styles.filterTabActive]}
+                        onPress={() => setActiveTab(item.id as SearchTab)}
+                      >
+                        <ThemedText style={[styles.filterTabText, { color: activeTab === item.id ? '#fff' : colors.text }]}>
+                          {item.label}
+                        </ThemedText>
+                      </TouchableOpacity>
+                    )}
+                  />
+                </View>
+
+                {loading ? (
+                  <View style={styles.loadingContainer}>
+                    <ThemedText style={{ color: colors.textSec }}>Searching...</ThemedText>
+                  </View>
+                ) : (
+                  renderSearchResultRails()
+                )}
+              </View>
+            )}
+          </View>
+        )}
+        contentContainerStyle={styles.resultsContainer}
         refreshControl={
           <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={ORANGE} />
         }
-      >
-        {searchText.length > 0 ? (
-          renderSearchResults()
-        ) : (
-          <>
-            {renderQuickCategories()}
-            {renderFeaturedRestaurants()}
-            {renderPopularDishes()}
-            {renderRecentSearches()}
-          </>
-        )}
-      </ScrollView>
+      />
     </View>
   );
 }
-
 const styles = StyleSheet.create({
   container: {
     flex: 1,
@@ -780,6 +936,7 @@ const styles = StyleSheet.create({
     fontSize: 32,
     fontWeight: '800',
     letterSpacing: -0.5,
+    lineHeight: 40,
   },
   headerSub: {
     fontSize: 16,
@@ -804,8 +961,11 @@ const styles = StyleSheet.create({
     marginLeft: 12,
     fontSize: 16,
   },
-  resultsList: {
-    paddingBottom: 20,
+  discoveryContent: {
+    paddingBottom: 120,
+  },
+  searchContent: {
+    paddingBottom: 120,
   },
   filterSection: {
     paddingVertical: 12,
@@ -831,47 +991,27 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '600',
   },
-  filterTabTextActive: {
-    color: '#fff',
-  },
-  divider: {
-    width: 1,
-    height: 20,
-    marginHorizontal: 5,
-  },
-  filterPill: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingVertical: 6,
-    paddingHorizontal: 12,
-    borderRadius: 15,
-    borderWidth: 1,
-    gap: 4,
-  },
-  filterPillActive: {
-    backgroundColor: ORANGE,
-  },
-  filterPillText: {
-    fontSize: 12,
-    fontWeight: '500',
-  },
-  filterPillTextActive: {
-    color: '#fff',
-  },
   section: {
     marginBottom: 28,
   },
   sectionHeader: {
     flexDirection: 'row',
     alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 20,
+    marginBottom: 14,
+  },
+  sectionTitle: {
+    fontSize: 22,
+    fontWeight: '700',
+  },
+  sectionTitleStandalone: {
     paddingHorizontal: 20,
     marginBottom: 16,
   },
-  sectionTitle: {
-    fontSize: 20,
-    fontWeight: '700',
-    paddingHorizontal: 20,
-    marginBottom: 16,
+  railHintText: {
+    fontSize: 12,
+    fontWeight: '600',
   },
   featuredBadge: {
     flexDirection: 'row',
@@ -879,7 +1019,6 @@ const styles = StyleSheet.create({
     paddingHorizontal: 10,
     paddingVertical: 4,
     borderRadius: 12,
-    marginLeft: 10,
   },
   featuredBadgeText: {
     color: '#FFF',
@@ -966,49 +1105,60 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: 'rgba(255,255,255,0.9)',
   },
-  dishGrid: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    paddingHorizontal: 20,
-    gap: 12,
+  popularRailContent: {
+    paddingLeft: 20,
+    paddingRight: 28,
   },
-  dishCard: {
-    width: (width - 52) / 2,
-    borderRadius: 16,
+  popularCard: {
+    width: width * 0.56,
+    height: 210,
+    borderRadius: 18,
+    marginRight: 14,
     overflow: 'hidden',
     borderWidth: 1,
   },
-  dishImage: {
+  popularCardImage: {
     width: '100%',
-    height: 100,
+    height: '100%',
   },
-  dishInfo: {
-    padding: 12,
+  popularCardGradient: {
+    ...StyleSheet.absoluteFillObject,
   },
-  dishName: {
-    fontSize: 14,
-    fontWeight: '600',
+  popularCardInfo: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    bottom: 0,
+    padding: 14,
   },
-  dishRestaurant: {
+  popularCardTitle: {
+    color: '#FFF',
+    fontSize: 16,
+    fontWeight: '700',
+  },
+  popularCardSub: {
+    color: 'rgba(255,255,255,0.86)',
     fontSize: 12,
-    marginTop: 2,
+    marginTop: 3,
   },
-  dishPriceRow: {
+  popularCardBottom: {
+    marginTop: 10,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    marginTop: 8,
   },
-  dishPrice: {
-    fontSize: 15,
+  popularCardPrice: {
+    color: '#FFF',
+    fontSize: 13,
     fontWeight: '700',
   },
-  addButton: {
-    width: 28,
-    height: 28,
-    borderRadius: 8,
-    justifyContent: 'center',
+  popularCardCTA: {
+    width: 26,
+    height: 26,
+    borderRadius: 13,
+    backgroundColor: ORANGE,
     alignItems: 'center',
+    justifyContent: 'center',
   },
   recentRow: {
     flexDirection: 'row',
@@ -1029,56 +1179,121 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '500',
   },
+  searchRailsWrap: {
+    paddingBottom: 20,
+  },
+  tabFallbackCard: {
+    marginHorizontal: 20,
+    marginBottom: 10,
+    padding: 14,
+    borderRadius: 14,
+    borderWidth: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 10,
+  },
+  tabFallbackTitle: {
+    fontSize: 14,
+    fontWeight: '700',
+  },
+  tabFallbackSub: {
+    fontSize: 12,
+    marginTop: 2,
+  },
+  tabFallbackAction: {
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 10,
+    backgroundColor: ORANGE,
+  },
+  tabFallbackActionText: {
+    color: '#FFF',
+    fontSize: 12,
+    fontWeight: '700',
+  },
+  searchRailContent: {
+    paddingLeft: 20,
+    paddingRight: 28,
+  },
+  searchPosterCard: {
+    width: width * 0.62,
+    height: 228,
+    borderRadius: 18,
+    marginRight: 14,
+    overflow: 'hidden',
+    borderWidth: 1,
+  },
+  searchPosterImage: {
+    width: '100%',
+    height: '100%',
+  },
+  searchPosterGradient: {
+    ...StyleSheet.absoluteFillObject,
+  },
+  searchPosterContent: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    bottom: 0,
+    padding: 14,
+  },
+  searchPosterTypeRow: {
+    flexDirection: 'row',
+    marginBottom: 8,
+  },
+  searchPosterTypePill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(242,124,34,0.92)',
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 999,
+    gap: 5,
+  },
+  searchPosterTypeText: {
+    color: '#FFF',
+    fontSize: 11,
+    fontWeight: '700',
+  },
+  searchPosterTitle: {
+    color: '#FFF',
+    fontSize: 17,
+    fontWeight: '700',
+  },
+  searchPosterSubtitle: {
+    color: 'rgba(255,255,255,0.86)',
+    fontSize: 12,
+    marginTop: 2,
+  },
+  searchPosterMetaPill: {
+    alignSelf: 'flex-start',
+    marginTop: 10,
+    backgroundColor: 'rgba(255,255,255,0.2)',
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: 999,
+  },
+  searchPosterMetaText: {
+    color: '#FFF',
+    fontSize: 12,
+    fontWeight: '600',
+  },
   resultsContainer: {
-    paddingHorizontal: 20,
-    paddingTop: 10,
+    paddingTop: 0,
   },
   loadingContainer: {
-    paddingVertical: 40,
+    paddingVertical: 42,
     alignItems: 'center',
   },
   emptyState: {
     alignItems: 'center',
     paddingVertical: 60,
+    paddingHorizontal: 20,
   },
   emptyText: {
     fontSize: 16,
     marginTop: 16,
-  },
-  resultCard: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    padding: 14,
-    borderRadius: 16,
-    borderWidth: 1,
-    marginBottom: 12,
-  },
-  resultIcon: {
-    width: 44,
-    height: 44,
-    borderRadius: 12,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  resultInfo: {
-    flex: 1,
-    marginLeft: 14,
-  },
-  resultTitle: {
-    fontSize: 16,
-    fontWeight: '600',
-  },
-  resultSub: {
-    fontSize: 13,
-    marginTop: 2,
-  },
-  resultMeta: {
-    paddingHorizontal: 10,
-    paddingVertical: 6,
-    borderRadius: 8,
-  },
-  resultMetaText: {
-    fontSize: 12,
-    fontWeight: '600',
+    textAlign: 'center',
   },
 });

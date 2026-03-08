@@ -70,6 +70,24 @@ export interface Order {
     };
 }
 
+export interface CartCheckoutOrderInput {
+    vendor_type: 'restaurant' | 'store';
+    vendor_id: string;
+    total_amount: number;
+    delivery_fee: number;
+    pickup_lat?: number | null;
+    pickup_lng?: number | null;
+    dropoff_lat?: number | null;
+    dropoff_lng?: number | null;
+    items: Array<{
+        menu_item_id?: string;
+        store_item_id?: string;
+        quantity: number;
+        price?: number;
+        options?: string;
+    }>;
+}
+
 interface OrderContextType {
     activeOrders: Order[];
     pastOrders: Order[];
@@ -87,7 +105,8 @@ interface OrderContextType {
             pickup_lng?: number;
             dropoff_lat?: number;
             dropoff_lng?: number;
-        }
+        },
+        deliveryFee?: number
     ) => Promise<string>;
     placeStoreOrder: (
         storeId: string,
@@ -98,8 +117,10 @@ interface OrderContextType {
             pickup_lng?: number;
             dropoff_lat?: number;
             dropoff_lng?: number;
-        }
+        },
+        deliveryFee?: number
     ) => Promise<string>;
+    placeCartOrders: (orders: CartCheckoutOrderInput[]) => Promise<string[]>;
     cancelOrder: (orderId: string) => Promise<void>;
 }
 
@@ -211,7 +232,8 @@ export function OrderProvider({ children }: { children: React.ReactNode }) {
             pickup_lng?: number;
             dropoff_lat?: number;
             dropoff_lng?: number;
-        }
+        },
+        deliveryFee?: number
     ) => {
         const { data, error } = await supabase.rpc('place_order', {
             p_restaurant_id: restaurantId,
@@ -220,7 +242,8 @@ export function OrderProvider({ children }: { children: React.ReactNode }) {
             p_pickup_lat: location?.pickup_lat,
             p_pickup_lng: location?.pickup_lng,
             p_dropoff_lat: location?.dropoff_lat,
-            p_dropoff_lng: location?.dropoff_lng
+            p_dropoff_lng: location?.dropoff_lng,
+            p_delivery_fee: deliveryFee ?? 0
         });
 
         if (error) throw error;
@@ -240,7 +263,8 @@ export function OrderProvider({ children }: { children: React.ReactNode }) {
             pickup_lng?: number;
             dropoff_lat?: number;
             dropoff_lng?: number;
-        }
+        },
+        deliveryFee?: number
     ) => {
         const { data, error } = await supabase.rpc('place_store_order', {
             p_store_id: storeId,
@@ -249,7 +273,8 @@ export function OrderProvider({ children }: { children: React.ReactNode }) {
             p_pickup_lat: location?.pickup_lat,
             p_pickup_lng: location?.pickup_lng,
             p_dropoff_lat: location?.dropoff_lat,
-            p_dropoff_lng: location?.dropoff_lng
+            p_dropoff_lng: location?.dropoff_lng,
+            p_delivery_fee: deliveryFee ?? 0
         });
 
         if (error) throw error;
@@ -258,6 +283,18 @@ export function OrderProvider({ children }: { children: React.ReactNode }) {
         // Refresh to show new order immediately
         refreshOrders();
         return data.order_id;
+    };
+
+    const placeCartOrders = async (orders: CartCheckoutOrderInput[]) => {
+        const { data, error } = await supabase.rpc('place_cart_orders', {
+            p_orders: orders
+        });
+
+        if (error) throw error;
+        if (data && !data.success) throw new Error(data.message || 'Failed to place cart orders');
+
+        refreshOrders();
+        return Array.isArray(data?.order_ids) ? data.order_ids : [];
     };
 
     const cancelOrder = async (orderId: string) => {
@@ -294,6 +331,7 @@ export function OrderProvider({ children }: { children: React.ReactNode }) {
             updateOrderStatus,
             placeOrder,
             placeStoreOrder,
+            placeCartOrders,
             cancelOrder
         }}>
             {children}

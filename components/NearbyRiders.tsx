@@ -179,6 +179,43 @@ export default function NearbyRiders({ ListHeaderComponent, searchQuery }: Nearb
                     : 999
             }));
 
+            // total_jobs can be stale in some rows; backfill with actual completed jobs.
+            const riderUserIds = [...new Set(processedRiders.map((r: any) => r.user_id).filter(Boolean))];
+            if (riderUserIds.length > 0) {
+                const [deliveryJobsRes, orderJobsRes] = await Promise.all([
+                    supabase
+                        .from('delivery_requests')
+                        .select('rider_id')
+                        .in('rider_id', riderUserIds)
+                        .eq('status', 'delivered'),
+                    supabase
+                        .from('orders')
+                        .select('rider_id')
+                        .in('rider_id', riderUserIds)
+                        .eq('status', 'delivered')
+                ]);
+
+                if (!deliveryJobsRes.error && !orderJobsRes.error) {
+                    const actualJobCounts: Record<string, number> = {};
+
+                    (deliveryJobsRes.data || []).forEach((job: any) => {
+                        if (!job?.rider_id) return;
+                        actualJobCounts[job.rider_id] = (actualJobCounts[job.rider_id] || 0) + 1;
+                    });
+
+                    (orderJobsRes.data || []).forEach((job: any) => {
+                        if (!job?.rider_id) return;
+                        actualJobCounts[job.rider_id] = (actualJobCounts[job.rider_id] || 0) + 1;
+                    });
+
+                    processedRiders = processedRiders.map((rider: any) => {
+                        const storedJobs = Number(rider.total_jobs) || 0;
+                        const computedJobs = actualJobCounts[rider.user_id] || 0;
+                        return { ...rider, total_jobs: Math.max(storedJobs, computedJobs) };
+                    });
+                }
+            }
+
             // Search filter (client-side)
             if (searchQuery) {
                 const queryLower = searchQuery.toLowerCase();
@@ -448,17 +485,6 @@ export default function NearbyRiders({ ListHeaderComponent, searchQuery }: Nearb
                                 <FilterChip label="Tricycle (Keke)" active={vehicleFilter === 'tricycle'} onPress={() => setVehicleFilter('tricycle')} />
                                 <FilterChip label="Car" active={vehicleFilter === 'car'} onPress={() => setVehicleFilter('car')} />
                                 <FilterChip label="Van/Truck" active={vehicleFilter === 'van'} onPress={() => setVehicleFilter('van')} />
-                            </View>
-                        </ScrollView>
-
-                        <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.filterRow}>
-                            <View style={styles.filterGroup}>
-                                <ThemedText style={[styles.filterLabel, { color: mutedText }]}>Distance:</ThemedText>
-                                <FilterChip label="Any" active={distanceFilter === 'all'} onPress={() => setDistanceFilter('all')} />
-                                <FilterChip label="1km" active={distanceFilter === 1} onPress={() => setDistanceFilter(1)} />
-                                <FilterChip label="3km" active={distanceFilter === 3} onPress={() => setDistanceFilter(3)} />
-                                <FilterChip label="5km" active={distanceFilter === 5} onPress={() => setDistanceFilter(5)} />
-                                <FilterChip label="10km" active={distanceFilter === 10} onPress={() => setDistanceFilter(10)} />
                             </View>
                         </ScrollView>
 

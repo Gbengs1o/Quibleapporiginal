@@ -276,10 +276,16 @@ export default function RiderProfileScreen() {
 
     const fetchRiderDetails = async () => {
         try {
+            const riderUserId = Array.isArray(id) ? id[0] : id;
+            if (!riderUserId) {
+                setLoading(false);
+                return;
+            }
+
             const { data, error } = await supabase
                 .from('riders')
                 .select(`*, profile:profiles(*)`)
-                .eq('user_id', id)
+                .eq('user_id', riderUserId)
                 .single();
 
             if (error) throw error;
@@ -294,35 +300,58 @@ export default function RiderProfileScreen() {
                 });
             }
 
-            const { count: deliveryCount } = await supabase
-                .from('delivery_requests')
-                .select('*', { count: 'exact', head: true })
-                .eq('rider_id', id)
-                .eq('status', 'delivered');
+            const [
+                { count: logisticsDeliveredCount },
+                { count: foodDeliveredCount },
+                { data: deliveryReviewsData },
+                { data: foodOrderRiderReviewsData }
+            ] = await Promise.all([
+                supabase
+                    .from('delivery_requests')
+                    .select('*', { count: 'exact', head: true })
+                    .eq('rider_id', riderUserId)
+                    .eq('status', 'delivered'),
+                supabase
+                    .from('orders')
+                    .select('*', { count: 'exact', head: true })
+                    .eq('rider_id', riderUserId)
+                    .eq('status', 'delivered'),
+                supabase
+                    .from('reviews')
+                    .select('*')
+                    .eq('reviewee_id', riderUserId)
+                    .eq('role', 'user'),
+                supabase
+                    .from('rider_reviews')
+                    .select('*')
+                    .eq('rider_id', riderUserId)
+            ]);
 
-            const { data: reviewsData } = await supabase
-                .from('reviews')
-                .select('*')
-                .eq('reviewee_id', id)
-                .order('created_at', { ascending: false });
+            const normalizedFoodReviews = (foodOrderRiderReviewsData || []).map((review: any) => ({
+                ...review,
+                source: 'food_order'
+            }));
+
+            const allReviews = [...(deliveryReviewsData || []), ...normalizedFoodReviews].sort(
+                (a: any, b: any) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
+            );
 
             // Use stored metrics to match the Dashboard Card exactly
             const avgRating = data.average_rating !== undefined && data.average_rating !== null
                 ? Number(data.average_rating).toFixed(1)
-                : (reviewsData?.length
-                    ? (reviewsData.reduce((acc: any, curr: any) => acc + (curr.rating || 0), 0) / reviewsData.length).toFixed(1)
+                : (allReviews.length
+                    ? (allReviews.reduce((acc: any, curr: any) => acc + (curr.rating || 0), 0) / allReviews.length).toFixed(1)
                     : '5.0');
 
-            const totalDeliveries = data.total_jobs !== undefined && data.total_jobs !== null
-                ? data.total_jobs
-                : (deliveryCount || 0);
+            const computedDeliveries = (logisticsDeliveredCount || 0) + (foodDeliveredCount || 0);
+            const totalDeliveries = Math.max(Number(data.total_jobs) || 0, computedDeliveries);
 
             setStats({
                 deliveries: totalDeliveries,
                 rating: parseFloat(avgRating as string),
-                reviews: reviewsData?.length || 0
+                reviews: allReviews.length
             });
-            setReviews(reviewsData || []);
+            setReviews(allReviews);
 
         } catch (error) {
             console.error(error);

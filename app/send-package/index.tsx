@@ -32,6 +32,7 @@ const { width } = Dimensions.get('window');
 
 type Category = 'intra' | 'inter';
 type Prediction = { place_id: string; description: string };
+type CityContext = { name: string; lat: number; lng: number };
 
 const VEHICLE_OPTIONS = [
     { id: 'bicycle', label: 'Bicycle', icon: 'bicycle' as const },
@@ -59,6 +60,7 @@ export default function SendPackageScreen() {
     const success = '#22C55E';
 
     // State
+    const [requestMode, setRequestMode] = useState<'package' | 'ride'>('package');
     const [category, setCategory] = useState<Category>('intra');
     const [pickup, setPickup] = useState<{ lat: number; lng: number; address: string } | null>(null);
     const [dropoff, setDropoff] = useState<{ lat: number; lng: number; address: string } | null>(null);
@@ -68,6 +70,7 @@ export default function SendPackageScreen() {
     const [dropoffSuggestions, setDropoffSuggestions] = useState<Prediction[]>([]);
     const [showPickupSuggestions, setShowPickupSuggestions] = useState(false);
     const [showDropoffSuggestions, setShowDropoffSuggestions] = useState(false);
+    const [cityContext, setCityContext] = useState<CityContext | null>(null);
     const [description, setDescription] = useState('');
     const [recipientName, setRecipientName] = useState('');
     const [recipientPhone, setRecipientPhone] = useState('');
@@ -99,6 +102,53 @@ export default function SendPackageScreen() {
     // Minimum price is 50% of estimated or admin-configured floor
     const minPrice = Math.max(feeConfig.item_min_price, Math.round(estimatedPrice * 0.5));
 
+    const extractCityFromAddressComponents = (addressComponents: any[] = []) => {
+        const preferredTypes = ['locality', 'administrative_area_level_2', 'administrative_area_level_1'];
+        for (const type of preferredTypes) {
+            const match = addressComponents.find((component: any) => Array.isArray(component?.types) && component.types.includes(type));
+            if (match?.long_name) return match.long_name as string;
+        }
+        return null;
+    };
+
+    const extractCityFromAddressText = (address: string) => {
+        if (!address) return null;
+        const parts = address.split(',').map((part) => part.trim()).filter(Boolean);
+        if (parts.length >= 2) {
+            return parts[parts.length - 2];
+        }
+        return null;
+    };
+
+    const syncCityContext = useCallback(async (lat: number, lng: number, address?: string, addressComponents?: any[]) => {
+        let cityName =
+            extractCityFromAddressComponents(addressComponents || []) ||
+            extractCityFromAddressText(address || '');
+
+        if (!cityName) {
+            try {
+                const geoRes = await fetch(
+                    `https://maps.googleapis.com/maps/api/geocode/json?latlng=${lat},${lng}&key=${GOOGLE_API_KEY}`
+                );
+                const geoData = await geoRes.json();
+                const topResult = geoData?.results?.[0];
+                cityName =
+                    extractCityFromAddressComponents(topResult?.address_components || []) ||
+                    extractCityFromAddressText(topResult?.formatted_address || '');
+            } catch (err) {
+                console.log('City sync failed', err);
+            }
+        }
+
+        if (cityName) {
+            setCityContext({
+                name: cityName,
+                lat,
+                lng,
+            });
+        }
+    }, []);
+
     useEffect(() => {
         (async () => {
             let { status } = await Location.requestForegroundPermissionsAsync();
@@ -110,6 +160,7 @@ export default function SendPackageScreen() {
                 latitudeDelta: 0.05,
                 longitudeDelta: 0.05,
             });
+            await syncCityContext(loc.coords.latitude, loc.coords.longitude);
         })();
         // Fetch admin-configurable delivery fees
         (async () => {
@@ -123,7 +174,7 @@ export default function SendPackageScreen() {
                 console.log('Fee config fetch failed, using defaults', err);
             }
         })();
-    }, []);
+    }, [syncCityContext]);
 
     // Debounced fetch suggestions
     const fetchSuggestions = useCallback((text: string, isPickup: boolean) => {
@@ -144,16 +195,29 @@ export default function SendPackageScreen() {
 
         debounceRef.current = setTimeout(async () => {
             try {
+                const shouldRestrictToCity = category === 'intra';
+                const focusLat = shouldRestrictToCity && cityContext ? cityContext.lat : region.latitude;
+                const focusLng = shouldRestrictToCity && cityContext ? cityContext.lng : region.longitude;
+                const radiusMeters = shouldRestrictToCity ? 35000 : 50000;
+                const strictBounds = shouldRestrictToCity ? '&strictbounds=true' : '';
                 const response = await fetch(
-                    `https://maps.googleapis.com/maps/api/place/autocomplete/json?input=${encodeURIComponent(text)}&key=${GOOGLE_API_KEY}&components=country:ng&location=${region.latitude},${region.longitude}&radius=50000`
+                    `https://maps.googleapis.com/maps/api/place/autocomplete/json?input=${encodeURIComponent(text)}&key=${GOOGLE_API_KEY}&components=country:ng&location=${focusLat},${focusLng}&radius=${radiusMeters}${strictBounds}`
                 );
                 const data = await response.json();
 
                 if (data.predictions) {
-                    const predictions = data.predictions.slice(0, 5).map((p: any) => ({
+                    let predictions: Prediction[] = data.predictions.slice(0, 8).map((p: any) => ({
                         place_id: p.place_id,
                         description: p.description
                     }));
+
+                    if (shouldRestrictToCity && cityContext?.name) {
+                        const cityNeedle = cityContext.name.toLowerCase();
+                        predictions = predictions.filter((p) => p.description.toLowerCase().includes(cityNeedle));
+                    }
+
+                    predictions = predictions.slice(0, 5);
+
                     if (isPickup) {
                         setPickupSuggestions(predictions);
                         setShowPickupSuggestions(predictions.length > 0);
@@ -166,13 +230,13 @@ export default function SendPackageScreen() {
                 console.error('Autocomplete error:', error);
             }
         }, 300); // 300ms debounce
-    }, [region]);
+    }, [category, cityContext, region]);
 
     // Select a suggestion
     const selectSuggestion = async (prediction: Prediction, isPickup: boolean) => {
         try {
             const response = await fetch(
-                `https://maps.googleapis.com/maps/api/place/details/json?place_id=${prediction.place_id}&key=${GOOGLE_API_KEY}&fields=geometry,formatted_address`
+                `https://maps.googleapis.com/maps/api/place/details/json?place_id=${prediction.place_id}&key=${GOOGLE_API_KEY}&fields=geometry,formatted_address,address_components`
             );
             const data = await response.json();
 
@@ -188,6 +252,14 @@ export default function SendPackageScreen() {
                     setPickupText(prediction.description);
                     setShowPickupSuggestions(false);
                     setPickupSuggestions([]);
+                    if (category === 'intra') {
+                        await syncCityContext(
+                            location.lat,
+                            location.lng,
+                            data.result.formatted_address || prediction.description,
+                            data.result.address_components || []
+                        );
+                    }
                 } else {
                     setDropoff(location);
                     setDropoffText(prediction.description);
@@ -222,6 +294,14 @@ export default function SendPackageScreen() {
                 });
                 setPickupText(address);
                 setShowPickupSuggestions(false);
+                if (category === 'intra') {
+                    await syncCityContext(
+                        loc.coords.latitude,
+                        loc.coords.longitude,
+                        address,
+                        data.results[0].address_components || []
+                    );
+                }
             }
         } catch (error) {
             Alert.alert('Error', 'Could not fetch your location.');
@@ -293,11 +373,15 @@ export default function SendPackageScreen() {
 
     const handleSubmit = async () => {
         if (!user) return;
-        if (!pickup || !dropoff || !description) {
-            Alert.alert('Missing Info', 'Please fill in pickup, dropoff, and item details.');
+        if (!pickup || !dropoff) {
+            Alert.alert('Missing Info', 'Please fill in pickup and dropoff locations.');
             return;
         }
-        if (selectedVehicles.length === 0) {
+        if (requestMode === 'package' && !description) {
+            Alert.alert('Missing Info', 'Please describe the item you are sending.');
+            return;
+        }
+        if (requestMode === 'package' && selectedVehicles.length === 0) {
             Alert.alert('Vehicle Required', 'Please select at least one preferred vehicle.');
             return;
         }
@@ -314,20 +398,31 @@ export default function SendPackageScreen() {
             }
 
             if (riderId) {
-                // Direct Rider Request
-                const { error } = await supabase.from('rider_requests').insert({
+                // Direct rider request routed through delivery_requests to keep rider workflow unified.
+                const { error } = await supabase.from('delivery_requests').insert({
                     user_id: user.id,
                     rider_id: riderId,
-                    pickup_location: pickup,
-                    dropoff_location: dropoff,
+                    pickup_address: pickup.address,
+                    pickup_latitude: pickup.lat,
+                    pickup_longitude: pickup.lng,
+                    dropoff_address: dropoff.address,
+                    dropoff_latitude: dropoff.lat,
+                    dropoff_longitude: dropoff.lng,
+                    vehicle_types: requestMode === 'ride' ? ['car'] : selectedVehicles,
                     status: 'pending',
                     offered_price: offeredPrice,
-                    item_description: description,
-                    item_image_url: mediaUrl
+                    item_type: requestMode === 'ride' ? 'ride' : 'parcel',
+                    request_type: requestMode,
+                    item_description: requestMode === 'ride' ? 'Passenger Pickup' : description,
+                    item_image_url: mediaUrl,
+                    media_type: media?.type,
+                    recipient_name: requestMode === 'ride' ? user.email : recipientName,
+                    recipient_phone: requestMode === 'ride' ? '' : recipientPhone,
+                    delivery_notes: deliveryNotes
                 });
 
                 if (error) throw error;
-                Alert.alert('Request Sent!', `Your request has been sent to ${riderName || 'the rider'}.`, [
+                Alert.alert('Request Sent!', `Your request has been sent directly to ${riderName || 'the rider'}.`, [
                     { text: 'OK', onPress: () => router.back() }
                 ]);
             } else {
@@ -340,19 +435,20 @@ export default function SendPackageScreen() {
                     dropoff_address: dropoff.address,
                     dropoff_latitude: dropoff.lat,
                     dropoff_longitude: dropoff.lng,
-                    item_description: description,
+                    item_description: requestMode === 'ride' ? 'Passenger Pickup' : description,
                     offered_price: offeredPrice,
                     status: 'pending',
-                    vehicle_types: selectedVehicles,
+                    vehicle_types: requestMode === 'ride' ? ['car'] : selectedVehicles,
                     item_image_url: mediaUrl,
                     media_type: media?.type,
-                    recipient_name: recipientName,
-                    recipient_phone: recipientPhone,
-                    delivery_notes: deliveryNotes
+                    recipient_name: requestMode === 'ride' ? user.email : recipientName,
+                    recipient_phone: requestMode === 'ride' ? '' : recipientPhone,
+                    delivery_notes: deliveryNotes,
+                    request_type: requestMode
                 });
 
                 if (error) throw error;
-                Alert.alert('🎉 Success!', 'Your delivery request has been created. Riders will bid shortly!', [
+                Alert.alert('🎉 Success!', requestMode === 'ride' ? 'Your ride request has been created. Riders will bid shortly!' : 'Your delivery request has been created. Riders will bid shortly!', [
                     { text: 'View Requests', onPress: () => router.back() }
                 ]);
             }
@@ -374,7 +470,7 @@ export default function SendPackageScreen() {
                         <ThemedText style={styles.modalEmoji}>😢</ThemedText>
                         <ThemedText style={styles.modalTitle}>Price Too Low!</ThemedText>
                         <ThemedText style={[styles.modalText, { color: mutedText }]}>
-                            Please reconsider! This price is not acceptable for a {distanceKm.toFixed(1)} km delivery.
+                            Please reconsider! This price is not acceptable for a {distanceKm.toFixed(1)} km {requestMode === 'ride' ? 'ride' : 'delivery'}.
                         </ThemedText>
                         <ThemedText style={[styles.modalMinPrice, { color: primary }]}>
                             Minimum: ₦{minPrice.toLocaleString()}
@@ -408,8 +504,8 @@ export default function SendPackageScreen() {
                     <Ionicons name="arrow-back" size={22} color={textColor} />
                 </TouchableOpacity>
                 <View style={styles.headerCenter}>
-                    <ThemedText style={styles.headerTitle}>{riderId ? `Request ${riderName || 'Rider'}` : 'Send Package'}</ThemedText>
-                    <ThemedText style={[styles.headerSubtitle, { color: mutedText }]}>Fast & Reliable Delivery</ThemedText>
+                    <ThemedText style={styles.headerTitle}>{riderId ? `Request ${riderName || 'Rider'}` : (requestMode === 'ride' ? 'Book a Ride' : 'Send Package')}</ThemedText>
+                    <ThemedText style={[styles.headerSubtitle, { color: mutedText }]}>{requestMode === 'ride' ? 'Get a ride anywhere' : 'Fast & Reliable Delivery'}</ThemedText>
                 </View>
                 <View style={{ width: 44 }} />
             </View>
@@ -423,6 +519,26 @@ export default function SendPackageScreen() {
                     keyboardShouldPersistTaps="always"
                     showsVerticalScrollIndicator={false}
                 >
+
+                    {/* Service Mode Toggle (Package vs Ride) */}
+                    <View style={[styles.sectionCard, { backgroundColor: cardBg, borderColor, padding: 8, marginBottom: 12 }]}>
+                        <View style={[styles.modeToggleContainer, { backgroundColor: inputBg }]}>
+                            <TouchableOpacity
+                                style={[styles.modeToggleBtn, requestMode === 'package' && styles.modeToggleBtnActive]}
+                                onPress={() => setRequestMode('package')}
+                            >
+                                <Ionicons name="cube" size={18} color={requestMode === 'package' ? '#fff' : mutedText} />
+                                <ThemedText style={[styles.modeToggleText, requestMode === 'package' && styles.modeToggleTextActive]}>Package</ThemedText>
+                            </TouchableOpacity>
+                            <TouchableOpacity
+                                style={[styles.modeToggleBtn, requestMode === 'ride' && styles.modeToggleBtnActive]}
+                                onPress={() => setRequestMode('ride')}
+                            >
+                                <Ionicons name="person" size={18} color={requestMode === 'ride' ? '#fff' : mutedText} />
+                                <ThemedText style={[styles.modeToggleText, requestMode === 'ride' && styles.modeToggleTextActive]}>Ride (Uber)</ThemedText>
+                            </TouchableOpacity>
+                        </View>
+                    </View>
 
                     {/* Map Section */}
                     <View style={styles.mapWrapper}>
@@ -492,6 +608,14 @@ export default function SendPackageScreen() {
                                 <ThemedText style={[styles.toggleText, category === 'inter' && styles.toggleTextActive]}>City to City</ThemedText>
                             </TouchableOpacity>
                         </View>
+                        {category === 'intra' && cityContext?.name && (
+                            <View style={styles.cityHintRow}>
+                                <Ionicons name="shield-checkmark" size={14} color={primary} />
+                                <ThemedText style={[styles.cityHintText, { color: mutedText }]}>
+                                    In-city suggestions locked to {cityContext.name}
+                                </ThemedText>
+                            </View>
+                        )}
                     </View>
 
                     {/* Locations Section */}
@@ -585,112 +709,116 @@ export default function SendPackageScreen() {
                         </View>
                     </View>
 
-                    {/* Package Details */}
-                    <View style={[styles.sectionCard, { backgroundColor: cardBg, borderColor }]}>
-                        <View style={styles.sectionHeader}>
-                            <Ionicons name="cube" size={18} color={primary} style={{ marginRight: 8 }} />
-                            <ThemedText style={styles.sectionTitle}>Package Details</ThemedText>
-                        </View>
+                    {/* Package Details - Only show if in package mode */}
+                    {requestMode === 'package' && (
+                        <View style={[styles.sectionCard, { backgroundColor: cardBg, borderColor }]}>
+                            <View style={styles.sectionHeader}>
+                                <Ionicons name="cube" size={18} color={primary} style={{ marginRight: 8 }} />
+                                <ThemedText style={styles.sectionTitle}>Package Details</ThemedText>
+                            </View>
 
-                        <TextInput
-                            style={[styles.textInput, { backgroundColor: inputBg, color: textColor, borderColor }]}
-                            placeholder="What are you sending? (e.g., Documents, Electronics)"
-                            placeholderTextColor={mutedText}
-                            value={description}
-                            onChangeText={setDescription}
-                        />
+                            <TextInput
+                                style={[styles.textInput, { backgroundColor: inputBg, color: textColor, borderColor }]}
+                                placeholder="What are you sending? (e.g., Documents, Electronics)"
+                                placeholderTextColor={mutedText}
+                                value={description}
+                                onChangeText={setDescription}
+                            />
 
-                        {/* Vehicle Selection */}
-                        <ThemedText style={[styles.subLabel, { color: mutedText }]}>Preferred Vehicle(s)</ThemedText>
-                        <View style={styles.vehicleGrid}>
-                            {VEHICLE_OPTIONS.map((v) => {
-                                const isSelected = selectedVehicles.includes(v.id);
-                                return (
-                                    <TouchableOpacity
-                                        key={v.id}
-                                        style={[styles.vehicleCard, { backgroundColor: inputBg, borderColor: isSelected ? primary : borderColor }, isSelected && styles.vehicleCardSelected]}
-                                        onPress={() => toggleVehicle(v.id)}
-                                    >
-                                        <View style={[styles.vehicleIconBg, { backgroundColor: isSelected ? primary : borderColor }]}>
-                                            <Ionicons name={v.icon} size={20} color={isSelected ? '#fff' : mutedText} />
-                                        </View>
-                                        <ThemedText style={[styles.vehicleLabel, isSelected && { color: primary, fontWeight: '700' }]}>{v.label}</ThemedText>
-                                        {isSelected && (
-                                            <View style={styles.vehicleCheck}>
-                                                <Ionicons name="checkmark-circle" size={18} color={primary} />
+                            {/* Vehicle Selection */}
+                            <ThemedText style={[styles.subLabel, { color: mutedText }]}>Preferred Vehicle(s)</ThemedText>
+                            <View style={styles.vehicleGrid}>
+                                {VEHICLE_OPTIONS.map((v) => {
+                                    const isSelected = selectedVehicles.includes(v.id);
+                                    return (
+                                        <TouchableOpacity
+                                            key={v.id}
+                                            style={[styles.vehicleCard, { backgroundColor: inputBg, borderColor: isSelected ? primary : borderColor }, isSelected && styles.vehicleCardSelected]}
+                                            onPress={() => toggleVehicle(v.id)}
+                                        >
+                                            <View style={[styles.vehicleIconBg, { backgroundColor: isSelected ? primary : borderColor }]}>
+                                                <Ionicons name={v.icon} size={20} color={isSelected ? '#fff' : mutedText} />
+                                            </View>
+                                            <ThemedText style={[styles.vehicleLabel, isSelected && { color: primary, fontWeight: '700' }]}>{v.label}</ThemedText>
+                                            {isSelected && (
+                                                <View style={styles.vehicleCheck}>
+                                                    <Ionicons name="checkmark-circle" size={18} color={primary} />
+                                                </View>
+                                            )}
+                                        </TouchableOpacity>
+                                    );
+                                })}
+                            </View>
+
+                            {/* Media Upload */}
+                            <ThemedText style={[styles.subLabel, { color: mutedText }]}>Package Photo (Optional)</ThemedText>
+                            <View style={styles.mediaRow}>
+                                <TouchableOpacity style={[styles.mediaBtnLarge, { backgroundColor: inputBg, borderColor }]} onPress={() => pickMedia('image')}>
+                                    <Ionicons name="camera-outline" size={28} color={mutedText} />
+                                    <ThemedText style={[styles.mediaBtnText, { color: mutedText }]}>Add Photo</ThemedText>
+                                </TouchableOpacity>
+                                {media && (
+                                    <View style={styles.mediaPreviewContainer}>
+                                        {media.type === 'image' ? (
+                                            <Image source={{ uri: media.uri }} style={styles.mediaPreviewImage} contentFit="cover" />
+                                        ) : (
+                                            <View style={[styles.mediaPreviewImage, { backgroundColor: inputBg, justifyContent: 'center', alignItems: 'center' }]}>
+                                                <Ionicons name="videocam" size={32} color={primary} />
                                             </View>
                                         )}
-                                    </TouchableOpacity>
-                                );
-                            })}
+                                        <TouchableOpacity style={styles.mediaRemoveBtn} onPress={() => setMedia(null)}>
+                                            <Ionicons name="close-circle" size={24} color="#EF4444" />
+                                        </TouchableOpacity>
+                                    </View>
+                                )}
+                            </View>
                         </View>
+                    )}
 
-                        {/* Media Upload */}
-                        <ThemedText style={[styles.subLabel, { color: mutedText }]}>Package Photo (Optional)</ThemedText>
-                        <View style={styles.mediaRow}>
-                            <TouchableOpacity style={[styles.mediaBtnLarge, { backgroundColor: inputBg, borderColor }]} onPress={() => pickMedia('image')}>
-                                <Ionicons name="camera-outline" size={28} color={mutedText} />
-                                <ThemedText style={[styles.mediaBtnText, { color: mutedText }]}>Add Photo</ThemedText>
-                            </TouchableOpacity>
-                            {media && (
-                                <View style={styles.mediaPreviewContainer}>
-                                    {media.type === 'image' ? (
-                                        <Image source={{ uri: media.uri }} style={styles.mediaPreviewImage} contentFit="cover" />
-                                    ) : (
-                                        <View style={[styles.mediaPreviewImage, { backgroundColor: inputBg, justifyContent: 'center', alignItems: 'center' }]}>
-                                            <Ionicons name="videocam" size={32} color={primary} />
-                                        </View>
-                                    )}
-                                    <TouchableOpacity style={styles.mediaRemoveBtn} onPress={() => setMedia(null)}>
-                                        <Ionicons name="close-circle" size={24} color="#EF4444" />
-                                    </TouchableOpacity>
+                    {/* Recipient Details - Only show if in package mode */}
+                    {requestMode === 'package' && (
+                        <View style={[styles.sectionCard, { backgroundColor: cardBg, borderColor }]}>
+                            <View style={styles.sectionHeader}>
+                                <Ionicons name="person" size={18} color={primary} style={{ marginRight: 8 }} />
+                                <ThemedText style={styles.sectionTitle}>Recipient Details</ThemedText>
+                            </View>
+
+                            <View style={styles.inputRow}>
+                                <View style={[styles.inputIconBox, { backgroundColor: inputBg }]}>
+                                    <Ionicons name="person-outline" size={20} color={mutedText} />
                                 </View>
-                            )}
-                        </View>
-                    </View>
-
-                    {/* Recipient Details */}
-                    <View style={[styles.sectionCard, { backgroundColor: cardBg, borderColor }]}>
-                        <View style={styles.sectionHeader}>
-                            <Ionicons name="person" size={18} color={primary} style={{ marginRight: 8 }} />
-                            <ThemedText style={styles.sectionTitle}>Recipient Details</ThemedText>
-                        </View>
-
-                        <View style={styles.inputRow}>
-                            <View style={[styles.inputIconBox, { backgroundColor: inputBg }]}>
-                                <Ionicons name="person-outline" size={20} color={mutedText} />
+                                <TextInput
+                                    style={[styles.textInputWithIcon, { backgroundColor: inputBg, color: textColor }]}
+                                    placeholder="Recipient Name"
+                                    placeholderTextColor={mutedText}
+                                    value={recipientName}
+                                    onChangeText={setRecipientName}
+                                />
+                            </View>
+                            <View style={styles.inputRow}>
+                                <View style={[styles.inputIconBox, { backgroundColor: inputBg }]}>
+                                    <Ionicons name="call-outline" size={20} color={mutedText} />
+                                </View>
+                                <TextInput
+                                    style={[styles.textInputWithIcon, { backgroundColor: inputBg, color: textColor }]}
+                                    placeholder="Recipient Phone"
+                                    placeholderTextColor={mutedText}
+                                    value={recipientPhone}
+                                    onChangeText={setRecipientPhone}
+                                    keyboardType="phone-pad"
+                                />
                             </View>
                             <TextInput
-                                style={[styles.textInputWithIcon, { backgroundColor: inputBg, color: textColor }]}
-                                placeholder="Recipient Name"
+                                style={[styles.textAreaInput, { backgroundColor: inputBg, color: textColor, borderColor }]}
+                                placeholder="Delivery notes (optional)"
                                 placeholderTextColor={mutedText}
-                                value={recipientName}
-                                onChangeText={setRecipientName}
+                                value={deliveryNotes}
+                                onChangeText={setDeliveryNotes}
+                                multiline
+                                numberOfLines={3}
                             />
                         </View>
-                        <View style={styles.inputRow}>
-                            <View style={[styles.inputIconBox, { backgroundColor: inputBg }]}>
-                                <Ionicons name="call-outline" size={20} color={mutedText} />
-                            </View>
-                            <TextInput
-                                style={[styles.textInputWithIcon, { backgroundColor: inputBg, color: textColor }]}
-                                placeholder="Recipient Phone"
-                                placeholderTextColor={mutedText}
-                                value={recipientPhone}
-                                onChangeText={setRecipientPhone}
-                                keyboardType="phone-pad"
-                            />
-                        </View>
-                        <TextInput
-                            style={[styles.textAreaInput, { backgroundColor: inputBg, color: textColor, borderColor }]}
-                            placeholder="Delivery notes (optional)"
-                            placeholderTextColor={mutedText}
-                            value={deliveryNotes}
-                            onChangeText={setDeliveryNotes}
-                            multiline
-                            numberOfLines={3}
-                        />
-                    </View>
+                    )}
 
                     {/* Pricing Section */}
                     {estimatedPrice > 0 && (
@@ -748,7 +876,7 @@ export default function SendPackageScreen() {
                         disabled={loading}
                     >
                         <Ionicons name="send" size={20} color="#fff" style={{ marginRight: 10 }} />
-                        <ThemedText style={styles.submitText}>{riderId ? 'Send Direct Request' : 'Request Delivery'}</ThemedText>
+                        <ThemedText style={styles.submitText}>{riderId ? 'Send Direct Request' : (requestMode === 'ride' ? 'Request Ride' : 'Request Delivery')}</ThemedText>
                     </TouchableOpacity>
 
                     <View style={{ height: 40 }} />
@@ -811,6 +939,14 @@ const styles = StyleSheet.create({
     toggleBtnActive: { backgroundColor: '#F27C22' },
     toggleText: { fontWeight: '600', fontSize: 14 },
     toggleTextActive: { color: '#fff' },
+    cityHintRow: { flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 10, marginLeft: 4 },
+    cityHintText: { fontSize: 12, fontWeight: '500' },
+
+    modeToggleContainer: { flexDirection: 'row', borderRadius: 12, padding: 4 },
+    modeToggleBtn: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', paddingVertical: 10, borderRadius: 10, gap: 8 },
+    modeToggleBtnActive: { backgroundColor: '#F27C22' },
+    modeToggleText: { fontWeight: '700', fontSize: 13 },
+    modeToggleTextActive: { color: '#fff' },
 
     // Location Autocomplete
     autocompleteContainer: { marginBottom: 8 },

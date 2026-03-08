@@ -1,13 +1,19 @@
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { useThemeColor } from '@/hooks/use-theme-color';
+import AsyncStorage from '@/utils/AsyncStorage';
+import {
+    extractReferralCodeFromAnyUrl,
+    normalizeReferralCode,
+    PENDING_REFERRAL_CODE_STORAGE_KEY,
+} from '@/utils/referral';
 import { supabase } from '@/utils/supabase';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import * as Linking from 'expo-linking';
-import { Link, useRouter } from 'expo-router';
+import { Link, useLocalSearchParams, useRouter } from 'expo-router';
 import * as WebBrowser from 'expo-web-browser';
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
     ActivityIndicator,
     Alert,
@@ -24,17 +30,23 @@ import {
 
 const SignupScreen = () => {
     const router = useRouter();
+    const params = useLocalSearchParams<{
+        ref?: string;
+        code?: string;
+        referral?: string;
+        referral_code?: string;
+    }>();
     const theme = useColorScheme() ?? 'light';
     const isDark = theme === 'dark';
     const [isLoading, setIsLoading] = useState(false);
 
     const backgroundColor = useThemeColor({ light: '#F8F9FC', dark: '#0D0D1A' }, 'background');
-    const cardBg = useThemeColor({ light: '#FFFFFF', dark: '#1A1A2E' }, 'card');
+    const cardBg = useThemeColor({ light: '#FFFFFF', dark: '#1A1A2E' }, 'background');
     const labelColor = useThemeColor({ light: '#1F2050', dark: '#E0E0E0' }, 'text');
     const inputBgColor = useThemeColor({ light: '#F5F6FA', dark: '#252538' }, 'background');
-    const inputBorderColor = useThemeColor({ light: '#E8E9F0', dark: '#38384A' }, 'border');
+    const inputBorderColor = useThemeColor({ light: '#E8E9F0', dark: '#38384A' }, 'background');
     const inputTextColor = useThemeColor({ light: '#1F2050', dark: '#FFF' }, 'text');
-    const borderColor = useThemeColor({ light: '#E0E0E0', dark: '#3D3D5C' }, 'border');
+    const borderColor = useThemeColor({ light: '#E0E0E0', dark: '#3D3D5C' }, 'background');
 
     // Form state
     const [formData, setFormData] = useState({
@@ -43,12 +55,77 @@ const SignupScreen = () => {
         phoneNumber: '',
         email: '',
         password: '',
-        confirmPassword: ''
+        confirmPassword: '',
+        referralCode: ''
     });
+
     const [agreedToTerms, setAgreedToTerms] = useState(false);
     const [errors, setErrors] = useState<Record<string, string>>({});
     const [showPassword, setShowPassword] = useState(false);
     const [showConfirmPassword, setShowConfirmPassword] = useState(false);
+
+    const updateReferralInForm = (code: string, force = false) => {
+        if (!code) return;
+        setFormData((prev) => {
+            if (!force && prev.referralCode.trim()) return prev;
+            return { ...prev, referralCode: code };
+        });
+    };
+
+    useEffect(() => {
+        let isMounted = true;
+
+        const hydrateReferralCode = async () => {
+            try {
+                const fromParams = normalizeReferralCode(
+                    typeof params.ref === 'string'
+                        ? params.ref
+                        : typeof params.code === 'string'
+                            ? params.code
+                            : typeof params.referral === 'string'
+                                ? params.referral
+                                : typeof params.referral_code === 'string'
+                                    ? params.referral_code
+                                    : ''
+                );
+
+                if (fromParams) {
+                    if (isMounted) updateReferralInForm(fromParams, true);
+                    await AsyncStorage.setItem(PENDING_REFERRAL_CODE_STORAGE_KEY, fromParams);
+                    return;
+                }
+
+                const initialUrl = await Linking.getInitialURL();
+                const fromUrl = extractReferralCodeFromAnyUrl(initialUrl);
+                if (fromUrl) {
+                    if (isMounted) updateReferralInForm(fromUrl, true);
+                    await AsyncStorage.setItem(PENDING_REFERRAL_CODE_STORAGE_KEY, fromUrl);
+                    return;
+                }
+
+                const pending = normalizeReferralCode(
+                    await AsyncStorage.getItem(PENDING_REFERRAL_CODE_STORAGE_KEY)
+                );
+                if (pending && isMounted) {
+                    updateReferralInForm(pending, false);
+                }
+            } catch (error) {
+                console.error('Error hydrating referral code on signup:', error);
+            }
+        };
+
+        void hydrateReferralCode();
+        return () => {
+            isMounted = false;
+        };
+    }, [params.ref, params.code, params.referral, params.referral_code]);
+
+    const updateField = (field: string, value: string) => {
+        setFormData(prev => ({ ...prev, [field]: value }));
+        if (errors[field]) {
+            setErrors(prev => ({ ...prev, [field]: '' }));
+        }
+    };
 
     // Validation functions
     const validateEmail = (email: string) => {
@@ -94,6 +171,7 @@ const SignupScreen = () => {
     const handleContinue = async () => {
         if (validateForm()) {
             setIsLoading(true);
+            const normalizedReferralCode = normalizeReferralCode(formData.referralCode);
             const { data, error } = await supabase.auth.signUp({
                 email: formData.email,
                 password: formData.password,
@@ -102,6 +180,7 @@ const SignupScreen = () => {
                         first_name: formData.firstName,
                         last_name: formData.lastName,
                         phone_number: formData.phoneNumber,
+                        referred_by_code: normalizedReferralCode || null
                     }
                 }
             });
@@ -109,6 +188,9 @@ const SignupScreen = () => {
             if (error) {
                 Alert.alert('Error', error.message);
             } else if (data.user) {
+                if (normalizedReferralCode) {
+                    await AsyncStorage.removeItem(PENDING_REFERRAL_CODE_STORAGE_KEY);
+                }
                 Alert.alert('Success', 'Please check your email for a verification link.');
                 router.push('/login');
             }
@@ -119,6 +201,12 @@ const SignupScreen = () => {
     const handleGoogleSignup = async () => {
         try {
             setIsLoading(true);
+            const normalizedReferralCode = normalizeReferralCode(formData.referralCode);
+            if (normalizedReferralCode) {
+                await AsyncStorage.setItem(PENDING_REFERRAL_CODE_STORAGE_KEY, normalizedReferralCode);
+            } else {
+                await AsyncStorage.removeItem(PENDING_REFERRAL_CODE_STORAGE_KEY);
+            }
             const redirectUrl = Linking.createURL('/(auth)/callback');
 
             const { data, error } = await supabase.auth.signInWithOAuth({
@@ -163,12 +251,6 @@ const SignupScreen = () => {
         }
     };
 
-    const updateField = (field: keyof typeof formData, value: string) => {
-        setFormData(prev => ({ ...prev, [field]: value }));
-        if (errors[field]) {
-            setErrors(prev => ({ ...prev, [field]: '' }));
-        }
-    };
 
     return (
         <KeyboardAvoidingView
@@ -336,80 +418,100 @@ const SignupScreen = () => {
                             {errors.confirmPassword && <Text style={styles.errorText}>{errors.confirmPassword}</Text>}
                         </View>
 
-                        {/* Terms Checkbox */}
-                        <TouchableOpacity
-                            style={styles.termsContainer}
-                            onPress={() => {
-                                setAgreedToTerms(!agreedToTerms);
-                                if (errors.terms) {
-                                    setErrors(prev => ({ ...prev, terms: '' }));
-                                }
-                            }}
-                            activeOpacity={0.7}
-                        >
-                            <View style={[
-                                styles.checkbox,
-                                { borderColor: errors.terms ? '#FF3B30' : (isDark ? '#555' : '#ddd') },
-                                agreedToTerms && styles.checkboxChecked
-                            ]}>
-                                {agreedToTerms && (
-                                    <Ionicons name="checkmark" size={16} color="#fff" />
-                                )}
-                            </View>
-                            <ThemedText style={[styles.termsText, { color: isDark ? '#888' : '#666' }]}>
-                                I agree to the{' '}
-                                <ThemedText style={styles.linkText}>Terms of Service</ThemedText>
-                                {' '}and{' '}
-                                <ThemedText style={styles.linkText}>Privacy Policy</ThemedText>
-                            </ThemedText>
-                        </TouchableOpacity>
-                        {errors.terms && <Text style={[styles.errorText, { marginTop: -8, marginBottom: 12 }]}>{errors.terms}</Text>}
-
-                        {/* Continue Button */}
-                        <TouchableOpacity
-                            onPress={handleContinue}
-                            activeOpacity={0.8}
-                            disabled={isLoading}
-                        >
-                            <LinearGradient
-                                colors={['#1F2050', '#2D2F6D']}
-                                start={{ x: 0, y: 0 }}
-                                end={{ x: 1, y: 0 }}
-                                style={[styles.continueButton, isLoading && styles.buttonDisabled]}
-                            >
-                                {isLoading ? (
-                                    <ActivityIndicator color="#fff" />
-                                ) : (
-                                    <>
-                                        <Ionicons name="arrow-forward" size={20} color="#fff" style={{ marginRight: 8 }} />
-                                        <Text style={styles.continueButtonText}>Create Account</Text>
-                                    </>
-                                )}
-                            </LinearGradient>
-                        </TouchableOpacity>
-
-                        {/* Divider */}
-                        <View style={styles.orContainer}>
-                            <View style={[styles.line, { backgroundColor: borderColor }]} />
-                            <ThemedText style={[styles.orText, { color: isDark ? '#666' : '#999' }]}>or</ThemedText>
-                            <View style={[styles.line, { backgroundColor: borderColor }]} />
-                        </View>
-
-                        {/* Google Button */}
-                        <TouchableOpacity
-                            style={[styles.googleButton, { borderColor: isDark ? '#3D3D5C' : '#E0E0E0' }]}
-                            onPress={handleGoogleSignup}
-                            activeOpacity={0.8}
-                        >
-                            <Ionicons name="logo-google" size={20} color={isDark ? '#fff' : '#1F2050'} style={{ marginRight: 10 }} />
-                            <Text style={[styles.googleButtonText, { color: labelColor }]}>Continue with Google</Text>
-                        </TouchableOpacity>
                     </View>
+
+                    {/* Referral Code (Optional) */}
+                    <View style={styles.inputGroup}>
+                        <ThemedText style={[styles.label, { color: labelColor }]}>Referral Code (Optional)</ThemedText>
+                        <View style={[
+                            styles.inputWrapper,
+                            { backgroundColor: inputBgColor, borderColor: inputBorderColor }
+                        ]}>
+                            <Ionicons name="gift-outline" size={18} color={isDark ? '#888' : '#999'} style={styles.inputIcon} />
+                            <TextInput
+                                style={[styles.input, { color: inputTextColor }]}
+                                value={formData.referralCode}
+                                onChangeText={(text) => updateField('referralCode', text)}
+                                placeholder="REF123"
+                                placeholderTextColor={isDark ? '#666' : '#999'}
+                                autoCapitalize="characters"
+                            />
+                        </View>
+                    </View>
+
+                    {/* Terms Checkbox */}
+                    <TouchableOpacity
+                        style={styles.termsContainer}
+                        onPress={() => {
+                            setAgreedToTerms(!agreedToTerms);
+                            if (errors.terms) {
+                                setErrors(prev => ({ ...prev, terms: '' }));
+                            }
+                        }}
+                        activeOpacity={0.7}
+                    >
+                        <View style={[
+                            styles.checkbox,
+                            { borderColor: errors.terms ? '#FF3B30' : (isDark ? '#555' : '#ddd') },
+                            agreedToTerms && styles.checkboxChecked
+                        ]}>
+                            {agreedToTerms && (
+                                <Ionicons name="checkmark" size={16} color="#fff" />
+                            )}
+                        </View>
+                        <ThemedText style={[styles.termsText, { color: isDark ? '#888' : '#666' }]}>
+                            I agree to the{' '}
+                            <ThemedText style={styles.linkText}>Terms of Service</ThemedText>
+                            {' '}and{' '}
+                            <ThemedText style={styles.linkText}>Privacy Policy</ThemedText>
+                        </ThemedText>
+                    </TouchableOpacity>
+                    {errors.terms && <Text style={[styles.errorText, { marginTop: -8, marginBottom: 12 }]}>{errors.terms}</Text>}
+
+                    {/* Continue Button */}
+                    <TouchableOpacity
+                        onPress={handleContinue}
+                        activeOpacity={0.8}
+                        disabled={isLoading}
+                    >
+                        <LinearGradient
+                            colors={['#1F2050', '#2D2F6D']}
+                            start={{ x: 0, y: 0 }}
+                            end={{ x: 1, y: 0 }}
+                            style={[styles.continueButton, isLoading && styles.buttonDisabled]}
+                        >
+                            {isLoading ? (
+                                <ActivityIndicator color="#fff" />
+                            ) : (
+                                <>
+                                    <Ionicons name="arrow-forward" size={20} color="#fff" style={{ marginRight: 8 }} />
+                                    <Text style={styles.continueButtonText}>Create Account</Text>
+                                </>
+                            )}
+                        </LinearGradient>
+                    </TouchableOpacity>
+
+                    {/* Divider */}
+                    <View style={styles.orContainer}>
+                        <View style={[styles.line, { backgroundColor: borderColor }]} />
+                        <ThemedText style={[styles.orText, { color: isDark ? '#666' : '#999' }]}>or</ThemedText>
+                        <View style={[styles.line, { backgroundColor: borderColor }]} />
+                    </View>
+
+                    {/* Google Button */}
+                    <TouchableOpacity
+                        style={[styles.googleButton, { borderColor: isDark ? '#3D3D5C' : '#E0E0E0' }]}
+                        onPress={handleGoogleSignup}
+                        activeOpacity={0.8}
+                    >
+                        <Ionicons name="logo-google" size={20} color={isDark ? '#fff' : '#1F2050'} style={{ marginRight: 10 }} />
+                        <Text style={[styles.googleButtonText, { color: labelColor }]}>Continue with Google</Text>
+                    </TouchableOpacity>
 
                     <View style={{ height: 40 }} />
                 </ScrollView>
             </ThemedView>
-        </KeyboardAvoidingView>
+        </KeyboardAvoidingView >
     );
 };
 
